@@ -51,10 +51,10 @@ def main(argv=None):
                     targets = [target for target in targets if args.operation is None or target["operation"] == args.operation]
                     if not targets:
                         raise ValueError("no configured targets for this operation")
-                    report.update(discover(state, client, targets, now, max_pages=1 if args.mode == "health" else args.max_pages, hash_images=args.mode != "health", resume=args.mode == "initial"))
+                    report.update(discover(state, client, targets, now, max_pages=1 if args.mode == "health" else args.max_pages, hash_images=args.mode != "health", resume=args.mode == "initial", read_only=args.mode == "health"))
                 elif args.mode != "deliver":
                     report.update(review(state, client, args.operation, now, mode=args.mode, limit=args.limit))
-                if not args.no_delivery:
+                if not args.no_delivery and args.mode != "health":
                     report["delivery"] = flush(state, client, os.environ["INGEST_URL"], os.environ["INGEST_TOKEN"])
     except Exception as exc:
         report["anomalies"].append({"portal": "runner", "reason": type(exc).__name__})

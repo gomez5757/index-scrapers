@@ -37,11 +37,11 @@ def image_hash(client, url):
         return None
 
 
-def discover(state, client, targets, now, max_pages=3, hash_images=True, resume=False):
+def discover(state, client, targets, now, max_pages=3, hash_images=True, resume=False, read_only=False):
     report = {"results": 0, "changed": 0, "anomalies": []}
     for target in prioritize(targets):
         key = f"initial:{target['portal']}:{target['municipality']}:{target['operation']}"
-        cursor = state.progress(key) if resume else None
+        cursor = state.progress(key) if resume and not read_only else None
         if cursor and cursor.get("done"):
             continue
         url = cursor.get("url") if cursor else target["url"]
@@ -62,22 +62,23 @@ def discover(state, client, targets, now, max_pages=3, hash_images=True, resume=
                 if not rows:
                     raise PortalBlocked("zero_results")
                 report["results"] += len(rows)
-                known_images = {item["id"]: item for item in state.catalog()}
-                for candidate in rows:
-                    if hash_images and candidate["property"]["cover_image"]:
-                        known = known_images.get(candidate["id"])
-                        if known and known.get("photo_hash") and known["property"].get("cover_image") == candidate["property"]["cover_image"]:
-                            candidate["photo_hash"] = known["photo_hash"]
-                        else:
-                            candidate["photo_hash"] = image_hash(client, candidate["property"]["cover_image"])
-                    report["changed"] += int(stage(state, candidate, now))
+                if not read_only:
+                    known_images = {item["id"]: item for item in state.catalog()}
+                    for candidate in rows:
+                        if hash_images and candidate["property"]["cover_image"]:
+                            known = known_images.get(candidate["id"])
+                            if known and known.get("photo_hash") and known["property"].get("cover_image") == candidate["property"]["cover_image"]:
+                                candidate["photo_hash"] = known["photo_hash"]
+                            else:
+                                candidate["photo_hash"] = image_hash(client, candidate["property"]["cover_image"])
+                        report["changed"] += int(stage(state, candidate, now))
                 missing = sum(not row["title"] or not row["images"] or row["property"]["area_m2"] is None or row["property"]["rooms"] is None for row in rows)
                 if missing / len(rows) > .25:
                     report["anomalies"].append({"portal": target["portal"], "municipality": target["municipality"], "reason": "missing_fields", "count": missing})
                 tree = HTMLParser(response.text)
                 link = tree.css_first('a[rel="next"], link[rel="next"], a[aria-label="Siguiente"], a[title="Siguiente"]')
                 next_page = trusted_url(target["portal"], link.attributes.get("href")) if link else None
-                if resume:
+                if resume and not read_only:
                     state.progress(key, {"url": next_page or url, "done": next_page is None})
                 if not next_page:
                     break
