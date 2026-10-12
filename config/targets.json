@@ -1,0 +1,236 @@
+[
+  {
+    "portal": "fotocasa",
+    "operation": "rent",
+    "province": "28",
+    "municipality": "28079",
+    "city_slug": "madrid",
+    "priority": "major",
+    "url": "https://www.fotocasa.es/es/alquiler/viviendas/madrid-capital/todas-las-zonas/l"
+  },
+  {
+    "portal": "fotocasa",
+    "operation": "rent",
+    "province": "08",
+    "municipality": "08019",
+    "city_slug": "barcelona",
+    "priority": "major",
+    "url": "https://www.fotocasa.es/es/alquiler/viviendas/barcelona-capital/todas-las-zonas/l"
+  },
+  {
+    "portal": "fotocasa",
+    "operation": "rent",
+    "province": "46",
+    "municipality": "46250",
+    "city_slug": "valencia",
+    "priority": "major",
+    "url": "https://www.fotocasa.es/es/alquiler/viviendas/valencia-capital/todas-las-zonas/l"
+  },
+  {
+    "portal": "fotocasa",
+    "operation": "rent",
+    "province": "41",
+    "municipality": "41091",
+    "city_slug": "sevilla",
+    "priority": "major",
+    "url": "https://www.fotocasa.es/es/alquiler/viviendas/sevilla-capital/todas-las-zonas/l"
+  },
+  {
+    "portal": "fotocasa",
+    "operation": "rent",
+    "province": "29",
+    "municipality": "29067",
+    "city_slug": "malaga",
+    "priority": "major",
+    "url": "https://www.fotocasa.es/es/alquiler/viviendas/malaga-capital/todas-las-zonas/l"
+  },
+  {
+    "portal": "fotocasa",
+    "operation": "rent",
+    "province": "48",
+    "municipality": "48020",
+    "city_slug": "bilbao",
+    "priority": "major",
+    "url": "https://www.fotocasa.es/es/alquiler/viviendas/bilbao/todas-las-zonas/l"
+  },
+  {
+    "portal": "fotocasa",
+    "operation": "sale",
+    "province": "28",
+    "municipality": "28079",
+    "city_slug": "madrid",
+    "priority": "major",
+    "url": "https://www.fotocasa.es/es/comprar/viviendas/madrid-capital/todas-las-zonas/l"
+  },
+  {
+    "portal": "fotocasa",
+    "operation": "sale",
+    "province": "08",
+    "municipality": "08019",
+    "city_slug": "barcelona",
+    "priority": "major",
+    "url": "https://www.fotocasa.es/es/comprar/viviendas/barcelona-capital/todas-las-zonas/l"
+  },
+  {
+    "portal": "fotocasa",
+    "operation": "sale",
+    "province": "46",
+    "municipality": "46250",
+    "city_slug": "valencia",
+    "priority": "major",
+    "url": "https://www.fotocasa.es/es/comprar/viviendas/valencia-capital/todas-las-zonas/l"
+  },
+  {
+    "portal": "fotocasa",
+    "operation": "sale",
+    "province": "41",
+    "municipality": "41091",
+    "city_slug": "sevilla",
+    "priority": "major",
+    "url": "https://www.fotocasa.es/es/comprar/viviendas/sevilla-capital/todas-las-zonas/l"
+  },
+  {
+    "portal": "fotocasa",
+    "operation": "sale",
+    "province": "29",
+    "municipality": "29067",
+    "city_slug": "malaga",
+    "priority": "major",
+    "url": "https://www.fotocasa.es/es/comprar/viviendas/malaga-capital/todas-las-zonas/l"
+  },
+  {
+    "portal": "fotocasa",
+    "operation": "sale",
+    "province": "48",
+    "municipality": "48020",
+    "city_slug": "bilbao",
+    "priority": "major",
+    "url": "https://www.fotocasa.es/es/comprar/viviendas/bilbao/todas-las-zonas/l"
+  },
+  {
+    "portal": "habitaclia",
+    "operation": "rent",
+    "province": "28",
+    "municipality": "28079",
+    "city_slug": "madrid",
+    "priority": "major",
+    "url": "https://www.habitaclia.com/alquiler/viviendas/madrid-provincia/madrid-capital/s"
+  },
+  {
+    "portal": "habitaclia",
+    "operation": "sale",
+    "province": "28",
+    "municipality": "28079",
+    "city_slug": "madrid",
+    "priority": "major",
+    "url": "https://www.habitaclia.com/comprar/viviendas/madrid-provincia/madrid-capital/s"
+  },
+  {
+    "portal": "habitaclia",
+    "operation": "rent",
+    "province": "08",
+    "municipality": "08019",
+    "city_slug": "barcelona",
+    "priority": "major",
+    "url": "https://www.habitaclia.com/alquiler/viviendas/barcelona-provincia/barcelona-capital/s"
+  },
+  {
+    "portal": "habitaclia",
+    "operation": "sale",
+    "province": "08",
+    "municipality": "08019",
+    "city_slug": "barcelona",
+    "priority": "major",
+    "url": "https://www.habitaclia.com/comprar/viviendas/barcelona-provincia/barcelona-capital/s"
+  },
+  {
+    "portal": "habitaclia",
+    "operation": "rent",
+    "province": "46",
+    "municipality": "46250",
+    "city_slug": "valencia",
+    "priority": "major",
+    "url": "https://www.habitaclia.com/alquiler/viviendas/valencia-provincia/valencia-capital/s"
+  },
+  {
+    "portal": "habitaclia",
+    "operation": "sale",
+    "province": "46",
+    "municipality": "46250",
+    "city_slug": "valencia",
+    "priority": "major",
+    "url": "https://www.habitaclia.com/comprar/viviendas/valencia-provincia/valencia-capital/s"
+  },
+  {
+    "portal": "habitaclia",
+    "operation": "rent",
+    "province": "41",
+    "municipality": "41091",
+    "city_slug": "sevilla",
+    "priority": "major",
+    "url": "https://www.habitaclia.com/alquiler/viviendas/sevilla-provincia/sevilla-capital/s"
+  },
+  {
+    "portal": "habitaclia",
+    "operation": "sale",
+    "province": "41",
+    "municipality": "41091",
+    "city_slug": "sevilla",
+    "priority": "major",
+    "url": "https://www.habitaclia.com/comprar/viviendas/sevilla-provincia/sevilla-capital/s"
+  },
+  {
+    "portal": "habitaclia",
+    "operation": "rent",
+    "province": "29",
+    "municipality": "29067",
+    "city_slug": "malaga",
+    "priority": "major",
+    "url": "https://www.habitaclia.com/alquiler/viviendas/malaga-provincia/malaga-capital/s"
+  },
+  {
+    "portal": "habitaclia",
+    "operation": "sale",
+    "province": "29",
+    "municipality": "29067",
+    "city_slug": "malaga",
+    "priority": "major",
+    "url": "https://www.habitaclia.com/comprar/viviendas/malaga-provincia/malaga-capital/s"
+  },
+  {
+    "portal": "habitaclia",
+    "operation": "rent",
+    "province": "48",
+    "municipality": "48020",
+    "city_slug": "bilbao",
+    "priority": "major",
+    "url": "https://www.habitaclia.com/alquiler/viviendas/bizkaia-provincia/bilbao/s"
+  },
+  {
+    "portal": "habitaclia",
+    "operation": "sale",
+    "province": "48",
+    "municipality": "48020",
+    "city_slug": "bilbao",
+    "priority": "major",
+    "url": "https://www.habitaclia.com/comprar/viviendas/bizkaia-provincia/bilbao/s"
+  },
+  {
+    "portal": "idealista",
+    "operation": "rent",
+    "province": "28",
+    "municipality": "28079",
+    "city_slug": "madrid",
+    "priority": "major",
+    "url": "https://www.idealista.com/alquiler-viviendas/madrid-madrid/"
+  },
+  {
+    "portal": "pisoscom",
+    "operation": "rent",
+    "province": "28",
+    "municipality": "28079",
+    "city_slug": "madrid",
+    "priority": "major",
+    "url": "https://www.pisos.com/alquiler/pisos-madrid_capital_zona_urbana/"
+  }
+]

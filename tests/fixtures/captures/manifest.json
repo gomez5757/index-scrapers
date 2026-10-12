@@ -1,0 +1,35 @@
+{
+  "captured_at": "2026-10-12",
+  "method": "plain-httpx; no retry; no bypass",
+  "results": [
+    {
+      "portal": "idealista",
+      "requested_url": "https://www.idealista.com/alquiler-viviendas/madrid-madrid/",
+      "final_url": "https://www.idealista.com/alquiler-viviendas/madrid-madrid/",
+      "status": 403,
+      "bytes": 773,
+      "file": "idealista.http-403.html"
+    },
+    {
+      "portal": "fotocasa",
+      "requested_url": "https://www.fotocasa.es/es/alquiler/viviendas/madrid-capital/todas-las-zonas/l",
+      "final_url": "https://www.fotocasa.es/es/alquiler/viviendas/madrid-capital/todas-las-zonas/l",
+      "status": 200,
+      "bytes": 1098111,
+      "file": "fotocasa.http-200.html"
+    },
+    {
+      "portal": "pisoscom",
+      "requested_url": "https://www.pisos.com/alquiler/pisos-madrid_capital/",
+      "error": "ReadError"
+    },
+    {
+      "portal": "habitaclia",
+      "requested_url": "https://www.habitaclia.com/alquiler-viviendas-madrid.htm",
+      "final_url": "https://www.habitaclia.com/alquiler/viviendas/madrid-provincia/madrid-capital/s",
+      "status": 200,
+      "bytes": 1537363,
+      "file": "habitaclia.http-200.html"
+    }
+  ]
+}

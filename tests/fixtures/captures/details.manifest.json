@@ -1,0 +1,22 @@
+{
+  "captured_at": "2026-10-12T17:50:45.568053+00:00",
+  "method": "plain-httpx; one request; no bypass",
+  "results": [
+    {
+      "portal": "fotocasa",
+      "requested_url": "https://www.fotocasa.es/es/alquiler/vivienda/madrid-capital/aire-acondicionado-calefaccion/191088451/d",
+      "final_url": "https://www.fotocasa.es/es/alquiler/vivienda/madrid-capital/aire-acondicionado-calefaccion/191088451/d",
+      "status": 200,
+      "bytes": 591298,
+      "file": "fotocasa.detail.http-200.html"
+    },
+    {
+      "portal": "habitaclia",
+      "requested_url": "https://www.habitaclia.com/alquiler/planta-intermedia/calle-de-la-ribera-de-curtidores-34/arganzuela/madrid-capital/78370e0d-4a95-4823-882c-69ec4a07c080/d",
+      "final_url": "https://www.habitaclia.com/alquiler/planta-intermedia/calle-de-la-ribera-de-curtidores-34/arganzuela/madrid-capital/78370e0d-4a95-4823-882c-69ec4a07c080/d",
+      "status": 200,
+      "bytes": 199066,
+      "file": "habitaclia.detail.http-200.html"
+    }
+  ]
+}

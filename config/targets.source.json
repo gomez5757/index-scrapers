@@ -1,0 +1,432 @@
+{
+  "verified_at": "2026-10-12T17:57:57.523776+00:00",
+  "method": "plain-httpx; accepted only HTTP200 plus matching embedded municipality code and non-empty results",
+  "results": [
+    {
+      "portal": "fotocasa",
+      "operation": "rent",
+      "municipality": "28079",
+      "requested_url": "https://www.fotocasa.es/es/alquiler/viviendas/madrid-capital/todas-las-zonas/l",
+      "status": 200,
+      "final_url": "https://www.fotocasa.es/es/alquiler/viviendas/madrid-capital/todas-las-zonas/l",
+      "source_code": "28079",
+      "count": 31,
+      "accepted": true
+    },
+    {
+      "portal": "fotocasa",
+      "operation": "rent",
+      "municipality": "08019",
+      "requested_url": "https://www.fotocasa.es/es/alquiler/viviendas/barcelona-capital/todas-las-zonas/l",
+      "status": 200,
+      "final_url": "https://www.fotocasa.es/es/alquiler/viviendas/barcelona-capital/todas-las-zonas/l",
+      "source_code": "8019",
+      "count": 31,
+      "accepted": false
+    },
+    {
+      "portal": "fotocasa",
+      "operation": "rent",
+      "municipality": "46250",
+      "requested_url": "https://www.fotocasa.es/es/alquiler/viviendas/valencia-capital/todas-las-zonas/l",
+      "status": 200,
+      "final_url": "https://www.fotocasa.es/es/alquiler/viviendas/valencia-capital/todas-las-zonas/l",
+      "source_code": "46250",
+      "count": 31,
+      "accepted": true
+    },
+    {
+      "portal": "fotocasa",
+      "operation": "rent",
+      "municipality": "41091",
+      "requested_url": "https://www.fotocasa.es/es/alquiler/viviendas/sevilla-capital/todas-las-zonas/l",
+      "status": 200,
+      "final_url": "https://www.fotocasa.es/es/alquiler/viviendas/sevilla-capital/todas-las-zonas/l",
+      "source_code": "41091",
+      "count": 30,
+      "accepted": true
+    },
+    {
+      "portal": "fotocasa",
+      "operation": "rent",
+      "municipality": "29067",
+      "requested_url": "https://www.fotocasa.es/es/alquiler/viviendas/malaga-capital/todas-las-zonas/l",
+      "status": 200,
+      "final_url": "https://www.fotocasa.es/es/alquiler/viviendas/malaga-capital/todas-las-zonas/l",
+      "source_code": "29067",
+      "count": 31,
+      "accepted": true
+    },
+    {
+      "portal": "fotocasa",
+      "operation": "rent",
+      "municipality": "48020",
+      "requested_url": "https://www.fotocasa.es/es/alquiler/viviendas/bilbao/todas-las-zonas/l",
+      "status": 200,
+      "final_url": "https://www.fotocasa.es/es/alquiler/viviendas/bilbao/todas-las-zonas/l",
+      "source_code": "48020",
+      "count": 31,
+      "accepted": true
+    },
+    {
+      "portal": "fotocasa",
+      "operation": "sale",
+      "municipality": "28079",
+      "requested_url": "https://www.fotocasa.es/es/comprar/viviendas/madrid-capital/todas-las-zonas/l",
+      "status": 200,
+      "final_url": "https://www.fotocasa.es/es/comprar/viviendas/madrid-capital/todas-las-zonas/l",
+      "source_code": "28079",
+      "count": 31,
+      "accepted": true
+    },
+    {
+      "portal": "fotocasa",
+      "operation": "sale",
+      "municipality": "08019",
+      "requested_url": "https://www.fotocasa.es/es/comprar/viviendas/barcelona-capital/todas-las-zonas/l",
+      "status": 200,
+      "final_url": "https://www.fotocasa.es/es/comprar/viviendas/barcelona-capital/todas-las-zonas/l",
+      "source_code": "8019",
+      "count": 31,
+      "accepted": false
+    },
+    {
+      "portal": "fotocasa",
+      "operation": "sale",
+      "municipality": "46250",
+      "requested_url": "https://www.fotocasa.es/es/comprar/viviendas/valencia-capital/todas-las-zonas/l",
+      "status": 200,
+      "final_url": "https://www.fotocasa.es/es/comprar/viviendas/valencia-capital/todas-las-zonas/l",
+      "source_code": "46250",
+      "count": 31,
+      "accepted": true
+    },
+    {
+      "portal": "fotocasa",
+      "operation": "sale",
+      "municipality": "41091",
+      "requested_url": "https://www.fotocasa.es/es/comprar/viviendas/sevilla-capital/todas-las-zonas/l",
+      "status": 200,
+      "final_url": "https://www.fotocasa.es/es/comprar/viviendas/sevilla-capital/todas-las-zonas/l",
+      "source_code": "41091",
+      "count": 31,
+      "accepted": true
+    },
+    {
+      "portal": "fotocasa",
+      "operation": "sale",
+      "municipality": "29067",
+      "requested_url": "https://www.fotocasa.es/es/comprar/viviendas/malaga-capital/todas-las-zonas/l",
+      "status": 200,
+      "final_url": "https://www.fotocasa.es/es/comprar/viviendas/malaga-capital/todas-las-zonas/l",
+      "source_code": "29067",
+      "count": 31,
+      "accepted": true
+    },
+    {
+      "portal": "fotocasa",
+      "operation": "sale",
+      "municipality": "48020",
+      "requested_url": "https://www.fotocasa.es/es/comprar/viviendas/bilbao/todas-las-zonas/l",
+      "status": 200,
+      "final_url": "https://www.fotocasa.es/es/comprar/viviendas/bilbao/todas-las-zonas/l",
+      "source_code": "48020",
+      "count": 30,
+      "accepted": true
+    },
+    {
+      "portal": "habitaclia",
+      "operation": "rent",
+      "municipality": "28079",
+      "requested_url": "https://www.habitaclia.com/alquiler-viviendas-madrid.htm",
+      "status": 200,
+      "final_url": "https://www.habitaclia.com/alquiler/viviendas/madrid-provincia/madrid-capital/s",
+      "source_code": "28079",
+      "count": 29,
+      "accepted": true
+    },
+    {
+      "portal": "habitaclia",
+      "operation": "rent",
+      "municipality": "08019",
+      "requested_url": "https://www.habitaclia.com/alquiler-viviendas-barcelona.htm",
+      "status": 200,
+      "final_url": "https://www.habitaclia.com/alquiler/viviendas/barcelona-provincia/barcelona-capital/s",
+      "source_code": null,
+      "count": 29,
+      "accepted": false
+    },
+    {
+      "portal": "habitaclia",
+      "operation": "rent",
+      "municipality": "46250",
+      "requested_url": "https://www.habitaclia.com/alquiler-viviendas-valencia.htm",
+      "status": 200,
+      "final_url": "https://www.habitaclia.com/alquiler/viviendas/valencia-provincia/valencia-capital/s",
+      "source_code": "46250",
+      "count": 29,
+      "accepted": true
+    },
+    {
+      "portal": "habitaclia",
+      "operation": "rent",
+      "municipality": "41091",
+      "requested_url": "https://www.habitaclia.com/alquiler-viviendas-sevilla.htm",
+      "status": 200,
+      "final_url": "https://www.habitaclia.com/alquiler/viviendas/sevilla-provincia/sevilla-capital/s",
+      "source_code": "41091",
+      "count": 29,
+      "accepted": true
+    },
+    {
+      "portal": "habitaclia",
+      "operation": "rent",
+      "municipality": "29067",
+      "requested_url": "https://www.habitaclia.com/alquiler-viviendas-malaga.htm",
+      "status": 200,
+      "final_url": "https://www.habitaclia.com/alquiler/viviendas/malaga-provincia/malaga-capital/s",
+      "source_code": "29067",
+      "count": 29,
+      "accepted": true
+    },
+    {
+      "portal": "habitaclia",
+      "operation": "rent",
+      "municipality": "48020",
+      "requested_url": "https://www.habitaclia.com/alquiler-viviendas-bilbao.htm",
+      "status": 200,
+      "final_url": "https://www.habitaclia.com/alquiler/viviendas/bizkaia-provincia/bilbao/s",
+      "source_code": "48020",
+      "count": 29,
+      "accepted": true
+    },
+    {
+      "portal": "habitaclia",
+      "operation": "sale",
+      "municipality": "28079",
+      "requested_url": "https://www.habitaclia.com/venta-viviendas-madrid.htm",
+      "status": 404,
+      "final_url": "https://www.habitaclia.com/venta-viviendas-madrid.htm",
+      "source_code": null,
+      "count": 0,
+      "accepted": false
+    },
+    {
+      "portal": "habitaclia",
+      "operation": "sale",
+      "municipality": "08019",
+      "requested_url": "https://www.habitaclia.com/venta-viviendas-barcelona.htm",
+      "status": 404,
+      "final_url": "https://www.habitaclia.com/venta-viviendas-barcelona.htm",
+      "source_code": null,
+      "count": 0,
+      "accepted": false
+    },
+    {
+      "portal": "habitaclia",
+      "operation": "sale",
+      "municipality": "46250",
+      "requested_url": "https://www.habitaclia.com/venta-viviendas-valencia.htm",
+      "status": 404,
+      "final_url": "https://www.habitaclia.com/venta-viviendas-valencia.htm",
+      "source_code": null,
+      "count": 0,
+      "accepted": false
+    },
+    {
+      "portal": "habitaclia",
+      "operation": "sale",
+      "municipality": "41091",
+      "requested_url": "https://www.habitaclia.com/venta-viviendas-sevilla.htm",
+      "status": 404,
+      "final_url": "https://www.habitaclia.com/venta-viviendas-sevilla.htm",
+      "source_code": null,
+      "count": 0,
+      "accepted": false
+    },
+    {
+      "portal": "habitaclia",
+      "operation": "sale",
+      "municipality": "29067",
+      "requested_url": "https://www.habitaclia.com/venta-viviendas-malaga.htm",
+      "status": 404,
+      "final_url": "https://www.habitaclia.com/venta-viviendas-malaga.htm",
+      "source_code": null,
+      "count": 0,
+      "accepted": false
+    },
+    {
+      "portal": "habitaclia",
+      "operation": "sale",
+      "municipality": "48020",
+      "requested_url": "https://www.habitaclia.com/venta-viviendas-bilbao.htm",
+      "status": 404,
+      "final_url": "https://www.habitaclia.com/venta-viviendas-bilbao.htm",
+      "source_code": null,
+      "count": 0,
+      "accepted": false
+    }
+  ],
+  "followup": {
+    "verified_at": "2026-10-12T18:11:47.176150+00:00",
+    "method": "INE codes zero-padded to five digits; Habitaclia selected search geography AND transaction match; all plain HTTP200 non-empty",
+    "results": [
+      {
+        "portal": "habitaclia",
+        "operation": "rent",
+        "municipality": "28079",
+        "requested_url": "https://www.habitaclia.com/alquiler/viviendas/madrid-provincia/madrid-capital/s",
+        "status": 200,
+        "final_url": "https://www.habitaclia.com/alquiler/viviendas/madrid-provincia/madrid-capital/s",
+        "source_code": "28079",
+        "source_operation": "rent",
+        "count": 29,
+        "accepted": true
+      },
+      {
+        "portal": "habitaclia",
+        "operation": "sale",
+        "municipality": "28079",
+        "requested_url": "https://www.habitaclia.com/comprar/viviendas/madrid-provincia/madrid-capital/s",
+        "status": 200,
+        "final_url": "https://www.habitaclia.com/comprar/viviendas/madrid-provincia/madrid-capital/s",
+        "source_code": "28079",
+        "source_operation": "buy",
+        "count": 29,
+        "accepted": false
+      },
+      {
+        "portal": "habitaclia",
+        "operation": "rent",
+        "municipality": "08019",
+        "requested_url": "https://www.habitaclia.com/alquiler/viviendas/barcelona-provincia/barcelona-capital/s",
+        "status": 200,
+        "final_url": "https://www.habitaclia.com/alquiler/viviendas/barcelona-provincia/barcelona-capital/s",
+        "source_code": "08019",
+        "source_operation": "rent",
+        "count": 29,
+        "accepted": true
+      },
+      {
+        "portal": "habitaclia",
+        "operation": "sale",
+        "municipality": "08019",
+        "requested_url": "https://www.habitaclia.com/comprar/viviendas/barcelona-provincia/barcelona-capital/s",
+        "status": 200,
+        "final_url": "https://www.habitaclia.com/comprar/viviendas/barcelona-provincia/barcelona-capital/s",
+        "source_code": "08019",
+        "source_operation": "buy",
+        "count": 29,
+        "accepted": false
+      },
+      {
+        "portal": "habitaclia",
+        "operation": "rent",
+        "municipality": "46250",
+        "requested_url": "https://www.habitaclia.com/alquiler/viviendas/valencia-provincia/valencia-capital/s",
+        "status": 200,
+        "final_url": "https://www.habitaclia.com/alquiler/viviendas/valencia-provincia/valencia-capital/s",
+        "source_code": "46250",
+        "source_operation": "rent",
+        "count": 29,
+        "accepted": true
+      },
+      {
+        "portal": "habitaclia",
+        "operation": "sale",
+        "municipality": "46250",
+        "requested_url": "https://www.habitaclia.com/comprar/viviendas/valencia-provincia/valencia-capital/s",
+        "status": 200,
+        "final_url": "https://www.habitaclia.com/comprar/viviendas/valencia-provincia/valencia-capital/s",
+        "source_code": "46250",
+        "source_operation": "buy",
+        "count": 29,
+        "accepted": false
+      },
+      {
+        "portal": "habitaclia",
+        "operation": "rent",
+        "municipality": "41091",
+        "requested_url": "https://www.habitaclia.com/alquiler/viviendas/sevilla-provincia/sevilla-capital/s",
+        "status": 200,
+        "final_url": "https://www.habitaclia.com/alquiler/viviendas/sevilla-provincia/sevilla-capital/s",
+        "source_code": "41091",
+        "source_operation": "rent",
+        "count": 29,
+        "accepted": true
+      },
+      {
+        "portal": "habitaclia",
+        "operation": "sale",
+        "municipality": "41091",
+        "requested_url": "https://www.habitaclia.com/comprar/viviendas/sevilla-provincia/sevilla-capital/s",
+        "status": 200,
+        "final_url": "https://www.habitaclia.com/comprar/viviendas/sevilla-provincia/sevilla-capital/s",
+        "source_code": "41091",
+        "source_operation": "buy",
+        "count": 29,
+        "accepted": false
+      },
+      {
+        "portal": "habitaclia",
+        "operation": "rent",
+        "municipality": "29067",
+        "requested_url": "https://www.habitaclia.com/alquiler/viviendas/malaga-provincia/malaga-capital/s",
+        "status": 200,
+        "final_url": "https://www.habitaclia.com/alquiler/viviendas/malaga-provincia/malaga-capital/s",
+        "source_code": "29067",
+        "source_operation": "rent",
+        "count": 29,
+        "accepted": true
+      },
+      {
+        "portal": "habitaclia",
+        "operation": "sale",
+        "municipality": "29067",
+        "requested_url": "https://www.habitaclia.com/comprar/viviendas/malaga-provincia/malaga-capital/s",
+        "status": 200,
+        "final_url": "https://www.habitaclia.com/comprar/viviendas/malaga-provincia/malaga-capital/s",
+        "source_code": "29067",
+        "source_operation": "buy",
+        "count": 29,
+        "accepted": false
+      },
+      {
+        "portal": "habitaclia",
+        "operation": "rent",
+        "municipality": "48020",
+        "requested_url": "https://www.habitaclia.com/alquiler/viviendas/bizkaia-provincia/bilbao/s",
+        "status": 200,
+        "final_url": "https://www.habitaclia.com/alquiler/viviendas/bizkaia-provincia/bilbao/s",
+        "source_code": "48020",
+        "source_operation": "rent",
+        "count": 29,
+        "accepted": true
+      },
+      {
+        "portal": "habitaclia",
+        "operation": "sale",
+        "municipality": "48020",
+        "requested_url": "https://www.habitaclia.com/comprar/viviendas/bizkaia-provincia/bilbao/s",
+        "status": 200,
+        "final_url": "https://www.habitaclia.com/comprar/viviendas/bizkaia-provincia/bilbao/s",
+        "source_code": "48020",
+        "source_operation": "buy",
+        "count": 29,
+        "accepted": false
+      }
+    ]
+  },
+  "normalization": {
+    "municipality": "INE5 padded with leading zero",
+    "habitaclia_operation": {
+      "rent": "rent",
+      "buy": "sale"
+    },
+    "browser_only_targets": [
+      "tests/fixtures/captures/idealista.browser-20261012.source.json",
+      "tests/fixtures/captures/pisoscom.browser-20261012.source.json"
+    ],
+    "browser_only_runtime": "HTTP blocked; health probes remain enabled; no bypass"
+  }
+}

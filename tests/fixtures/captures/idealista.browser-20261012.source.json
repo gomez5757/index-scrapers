@@ -1,0 +1,10 @@
+{
+  "source_url": "https://www.idealista.com/alquiler-viviendas/madrid-madrid/",
+  "captured_on": "2026-10-12",
+  "method": "DOM de primera tarjeta, extensión ChatGPT de Brave, pestaña propia en segundo plano",
+  "listing_id": "101920558",
+  "expected_price": 1000,
+  "expected_area_m2": 48,
+  "expected_rooms": 1,
+  "note": "Fragmento real de article.outerHTML; no incluye cookies, estado interno ni credenciales. No prueba acceso desde runners de Actions; HTTP directo devolvió 403."
+}

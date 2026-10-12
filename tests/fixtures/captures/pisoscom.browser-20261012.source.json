@@ -1,0 +1,12 @@
+{
+  "source_url": "https://www.pisos.com/alquiler/pisos-madrid_capital_zona_urbana/",
+  "requested_url": "https://www.pisos.com/alquiler/pisos-madrid_capital/",
+  "captured_on": "2026-10-12",
+  "method": "DOM de tarjeta, extensión ChatGPT de Brave, pestaña propia en segundo plano",
+  "listing_id": "67590000637.101000",
+  "expected_price": 2200,
+  "expected_area_m2": 170,
+  "expected_rooms": 3,
+  "expected_baths": 2,
+  "note": "Fragmento real de .ad-preview.outerHTML. No se exportaron cookies ni credenciales. Prueba HTTP inicial dio ReadError; no demuestra acceso de runners."
+}

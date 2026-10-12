@@ -1,0 +1,10 @@
+{
+  "source": "https://www.ine.es/daco/daco42/codmun/26codmun.xlsx",
+  "source_page": "https://www.ine.es/dyngs/INEbase/operacion.htm?c=Estadistica_C&cid=1254736177031&idp=1254735976614&menu=ultiDatos",
+  "reference_date": "2026-01-01",
+  "retrieved_date": "2026-10-12",
+  "source_sha256": "b4bea7c3cc1b295a73f7fa3ca68b2ef25c3a59833bd91ea5315ae25dcc1ca741",
+  "municipalities": 8132,
+  "provinces_and_autonomous_cities": 52,
+  "note": "Nombres oficiales; no son slugs ni URLs de portales. No incluye modificaciones posteriores al 1 de enero de 2026."
+}
