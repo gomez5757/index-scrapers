@@ -1,0 +1,63 @@
+name: Collect Index
+on:
+  schedule:
+    - cron: '3,13,23,33,43,53 * * * *'
+    - cron: '7,37 * * * *'
+    - cron: '11 */6 * * *'
+    - cron: '17 2 * * *'
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [initial, discover, prices, withdrawals]
+        default: initial
+      operation:
+        type: choice
+        options: [rent, sale, all]
+        default: rent
+      initialize_state:
+        description: 'Sólo primera ejecución: crear catálogo vacío si nunca hubo snapshot'
+        type: boolean
+        default: false
+concurrency:
+  group: index-durable-state
+  cancel-in-progress: false
+  queue: max
+permissions:
+  contents: read
+  actions: write
+  issues: write
+jobs:
+  task:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.select.outputs.mode }}
+      operation: ${{ steps.select.outputs.operation }}
+    steps:
+      - id: select
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const schedule = {
+              '3,13,23,33,43,53 * * * *': ['discover', 'rent'],
+              '7,37 * * * *': ['discover', 'sale'],
+              '11 */6 * * *': ['prices', 'rent'],
+              '17 2 * * *': ['prices', 'sale'],
+              '23 3 * * *': ['withdrawals', 'all']
+            };
+            const selected = context.eventName === 'schedule'
+              ? schedule[context.payload.schedule]
+              : [context.payload.inputs.mode, context.payload.inputs.operation];
+            if (!selected) throw new Error('Unknown scheduled task');
+            core.setOutput('mode', selected[0]);
+            core.setOutput('operation', selected[1]);
+  collect:
+    needs: task
+    uses: ./.github/workflows/run.yml
+    with:
+      mode: ${{ needs.task.outputs.mode }}
+      operation: ${{ needs.task.outputs.operation }}
+      initialize_state: ${{ github.event_name == 'workflow_dispatch' && inputs.initialize_state }}
+    secrets: inherit

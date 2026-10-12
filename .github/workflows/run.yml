@@ -1,0 +1,107 @@
+name: Durable collection job
+on:
+  workflow_call:
+    inputs:
+      mode:
+        required: true
+        type: string
+      operation:
+        required: true
+        type: string
+      initialize_state:
+        type: boolean
+        default: false
+    secrets:
+      INGEST_URL:
+        required: true
+      INGEST_TOKEN:
+        required: true
+jobs:
+  run:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      INGEST_URL: ${{ secrets.INGEST_URL }}
+      INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
+      TASK_MODE: ${{ inputs.mode }}
+      OPERATION: ${{ inputs.operation }}
+      INITIALIZE: ${{ inputs.initialize_state }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install '.[images]'
+      - id: restore
+        name: Restore shared catalogue and pending deliveries
+        shell: bash
+        run: |
+          args=(restore)
+          if [[ "$INITIALIZE" == 'true' && "$GITHUB_EVENT_NAME" == 'workflow_dispatch' ]]; then args+=(--initialize); fi
+          python -m index_scrapers.cli "${args[@]}"
+      - id: collect
+        name: Collect or review changes
+        shell: bash
+        run: |
+          args=("$TASK_MODE")
+          if [[ "$OPERATION" != 'all' ]]; then args+=(--operation "$OPERATION"); fi
+          python -m index_scrapers.cli "${args[@]}" --no-delivery
+      - id: snapshot_prepare
+        if: ${{ always() && steps.restore.outcome == 'success' }}
+        run: python -m index_scrapers.cli snapshot
+      - id: upload_prepare
+        if: ${{ always() && steps.snapshot_prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: index-state-${{ github.run_id }}-${{ github.run_attempt }}-pre
+          path: state/artifact/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+      - id: deliver
+        if: ${{ always() && steps.upload_prepare.outcome == 'success' }}
+        run: python -m index_scrapers.cli deliver --health delivery-health.json
+      - id: snapshot
+        if: ${{ always() && steps.restore.outcome == 'success' }}
+        run: python -m index_scrapers.cli snapshot
+      - id: upload
+        if: ${{ always() && steps.snapshot.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: index-state-${{ github.run_id }}-${{ github.run_attempt }}-final
+          path: state/artifact/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+      - name: Keep three snapshots after successful upload
+        if: ${{ always() && steps.upload.outcome == 'success' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const artifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, {...context.repo, per_page: 100});
+            const states = artifacts.filter(a => a.name.startsWith('index-state-') && !a.expired
+              && a.workflow_run?.head_branch === context.payload.repository.default_branch
+              && a.workflow_run?.head_repository_id === context.payload.repository.id)
+              .sort((a,b) => b.id-a.id);
+            for (const artifact of states.slice(3)) {
+              await github.rest.actions.deleteArtifact({...context.repo, artifact_id: artifact.id});
+            }
+      - name: Report anomalies without secrets
+        if: ${{ always() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let anomalies = [{portal:'runner', reason:'report_missing_or_restore_failed'}];
+            if (fs.existsSync('health.json')) anomalies = JSON.parse(fs.readFileSync('health.json','utf8')).anomalies || [];
+            if (fs.existsSync('delivery-health.json')) anomalies.push(...(JSON.parse(fs.readFileSync('delivery-health.json','utf8')).anomalies || []));
+            if (!anomalies.length) return;
+            const title = '[Index health] Extractor or durable state needs attention';
+            const issues = await github.paginate(github.rest.issues.listForRepo, {...context.repo, state:'open', per_page:100});
+            if (issues.some(issue => issue.title === title)) return;
+            const safe = anomalies.map(a => `${a.portal || 'runner'}: ${a.reason || 'unknown'}`).join('\n');
+            await github.rest.issues.create({...context.repo, title,
+              body:`${safe}\n\nRun: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`});
