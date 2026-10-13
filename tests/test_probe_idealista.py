@@ -81,8 +81,10 @@ def test_report_url_drops_credentials_and_query_tokens():
 
 @pytest.mark.parametrize("headless", [True, False])
 @pytest.mark.parametrize("via_home", [True, False])
-def test_driver_failure_still_produces_a_report_without_raw_error(monkeypatch, headless, via_home):
-    async def fail(playwright, report, *, headless, via_home):
+@pytest.mark.parametrize("browser", ["chromium", "firefox"])
+def test_driver_failure_still_produces_a_report_without_raw_error(monkeypatch, headless, via_home, browser):
+    async def fail(playwright, report, *, headless, via_home, browser):
+        assert browser == report["browser"]
         raise RuntimeError("secret?token=do-not-log")
 
     class FakeManager:
@@ -97,22 +99,25 @@ def test_driver_failure_still_produces_a_report_without_raw_error(monkeypatch, h
     monkeypatch.setitem(sys.modules, "playwright", ModuleType("playwright"))
     monkeypatch.setitem(sys.modules, "playwright.async_api", fake_api)
     monkeypatch.setattr(probe, "observe", fail)
-    result = asyncio.run(probe.run_probe(headless=headless, via_home=via_home))
+    result = asyncio.run(probe.run_probe(headless=headless, via_home=via_home, browser=browser))
     assert result["status"] == "error"
     assert result["reason"] == "runtime_error"
     assert result["error_type"] == "RuntimeError"
     assert result["headless"] is headless
+    assert result["browser"] == browser
     assert result["navigation_mode"] == ("via_home" if via_home else "direct")
     assert "do-not-log" not in str(result)
 
 
 @pytest.mark.parametrize("headless", [True, False])
-def test_browser_uses_a_clean_context_one_navigation_and_stops_on_block(monkeypatch, headless):
+@pytest.mark.parametrize("browser", ["chromium", "firefox"])
+def test_browser_uses_a_clean_context_one_navigation_and_stops_on_block(monkeypatch, headless, browser):
     fake_api = ModuleType("playwright.async_api")
     fake_api.TimeoutError = type("FakeTimeoutError", (Exception,), {})
     monkeypatch.setitem(sys.modules, "playwright", ModuleType("playwright"))
     monkeypatch.setitem(sys.modules, "playwright.async_api", fake_api)
     calls = []
+    selected_engines = []
 
     class EmptyLocator:
         async def count(self):
@@ -151,16 +156,46 @@ def test_browser_uses_a_clean_context_one_navigation_and_stops_on_block(monkeypa
             calls.append(("close",))
 
     class Chromium:
+        def __init__(self, name):
+            self.name = name
+
         async def launch(self, **kwargs):
             assert kwargs == {"headless": headless, "timeout": 10000}
+            selected_engines.append(self.name)
             return Browser()
 
-    playwright = type("Playwright", (), {"chromium": Chromium()})()
+    playwright = type("Playwright", (), {"chromium": Chromium("chromium"), "firefox": Chromium("firefox")})()
     report = {"http_status": None}
-    asyncio.run(probe.observe(playwright, report, headless=headless))
+    asyncio.run(probe.observe(playwright, report, headless=headless, browser=browser))
     assert report["status"] == "blocked"
     assert [call[0] for call in calls] == ["new_context", "goto", "close"]
     assert calls[1][1] == probe.TARGET_URL
+    assert selected_engines == [browser]
+
+
+@pytest.mark.parametrize("browser", [None, "firefox"])
+def test_cli_propagates_browser_engine_headed_and_navigation_mode(monkeypatch, tmp_path, browser):
+    observed = []
+
+    async def fake_probe(**kwargs):
+        observed.append(kwargs)
+        return {"status": "blocked", "browser": kwargs["browser"]}
+
+    output = tmp_path / "report.json"
+    argv = ["probe", "--headed", "--via-home", "--output", str(output)]
+    if browser:
+        argv.extend(["--browser", browser])
+    monkeypatch.setattr(sys, "argv", argv)
+    monkeypatch.setattr(probe, "run_probe", fake_probe)
+    assert probe.main() == 0
+    assert observed == [{"headless": False, "via_home": True, "browser": browser or "chromium"}]
+
+
+def test_cli_rejects_an_unavailable_browser_engine_before_starting_runtime(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["probe", "--browser", "webkit"])
+    with pytest.raises(SystemExit) as error:
+        probe.main()
+    assert error.value.code == 2
 
 
 @pytest.mark.parametrize("href,expected", [

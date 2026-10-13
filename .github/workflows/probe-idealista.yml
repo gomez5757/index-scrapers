@@ -13,6 +13,11 @@ on:
         type: choice
         options: [direct, via_home]
         default: direct
+      browser_engine:
+        description: 'Motor estándar de Playwright'
+        type: choice
+        options: [chromium, firefox]
+        default: chromium
 
 permissions:
   contents: read
@@ -23,6 +28,7 @@ jobs:
     timeout-minutes: 5
     env:
       NAVIGATION_MODE: ${{ inputs.navigation_mode }}
+      BROWSER_ENGINE: ${{ inputs.browser_engine }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -32,18 +38,20 @@ jobs:
           python-version: '3.12'
       - name: Install isolated probe dependencies
         run: python -m pip install . 'playwright==1.63.0'
-      - name: Install Chromium on this runner
-        run: python -m playwright install --with-deps chromium
+      - name: Install selected browser engine on this runner
+        run: |
+          case "$BROWSER_ENGINE" in chromium|firefox) ;; *) exit 2 ;; esac
+          python -m playwright install --with-deps "$BROWSER_ENGINE"
       - name: Observe one public page with a clean headless browser context
         if: ${{ inputs.browser_mode == 'headless' }}
         run: |
-          args=(--output probe-artifacts/report.json)
+          args=(--browser "$BROWSER_ENGINE" --output probe-artifacts/report.json)
           if [[ "$NAVIGATION_MODE" == 'via_home' ]]; then args+=(--via-home); fi
           timeout --signal=TERM --kill-after=5s 75s python scripts/probe_idealista.py "${args[@]}"
       - name: Observe one public page with a clean headed browser context
         if: ${{ inputs.browser_mode == 'headed' }}
         run: |
-          args=(--headed --output probe-artifacts/report.json)
+          args=(--browser "$BROWSER_ENGINE" --headed --output probe-artifacts/report.json)
           if [[ "$NAVIGATION_MODE" == 'via_home' ]]; then args+=(--via-home); fi
           timeout --signal=TERM --kill-after=5s 75s xvfb-run --auto-servernum python scripts/probe_idealista.py "${args[@]}"
       - name: Publish observation report

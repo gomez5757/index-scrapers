@@ -262,10 +262,11 @@ async def observe_via_home(page, report, timeout_error):
             return
 
 
-async def observe(playwright, report, *, headless=True, via_home=False):
+async def observe(playwright, report, *, headless=True, via_home=False, browser="chromium"):
     from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
-    browser = await playwright.chromium.launch(headless=headless, timeout=10000)
+    engine = getattr(playwright, browser)
+    browser = await engine.launch(headless=headless, timeout=10000)
     try:
         context = await browser.new_context()
         page = await context.new_page()
@@ -297,7 +298,7 @@ async def observe(playwright, report, *, headless=True, via_home=False):
         await asyncio.wait_for(browser.close(), timeout=3)
 
 
-async def run_probe(*, headless=True, via_home=False):
+async def run_probe(*, headless=True, via_home=False, browser="chromium"):
     started = time.monotonic()
     try:
         playwright_version = version("playwright")
@@ -313,7 +314,7 @@ async def run_probe(*, headless=True, via_home=False):
         "reason": "runtime_error",
         "listing_count": None,
         "playwright_version": playwright_version,
-        "browser": "chromium",
+        "browser": browser,
         "headless": headless,
         "navigation_mode": "via_home" if via_home else "direct",
         "trace": [],
@@ -324,7 +325,7 @@ async def run_probe(*, headless=True, via_home=False):
 
         async with asyncio.timeout(TOTAL_TIMEOUT_SECONDS):
             async with async_playwright() as playwright:
-                await observe(playwright, report, headless=headless, via_home=via_home)
+                await observe(playwright, report, headless=headless, via_home=via_home, browser=browser)
     except TimeoutError:
         report.update(status="error", reason="total_timeout")
     except Exception as error:
@@ -337,10 +338,11 @@ async def run_probe(*, headless=True, via_home=False):
 def main():
     arguments = argparse.ArgumentParser(description=__doc__)
     arguments.add_argument("--output", type=Path, default=Path("probe-artifacts/report.json"))
-    arguments.add_argument("--headed", action="store_true", help="Use a headed Chromium browser; Linux runners require a display such as Xvfb")
+    arguments.add_argument("--headed", action="store_true", help="Use a headed browser; Linux runners require a display such as Xvfb")
     arguments.add_argument("--via-home", action="store_true", help="Start at the public home page and follow published rental links, at most three documents")
+    arguments.add_argument("--browser", choices=["chromium", "firefox"], default="chromium", help="Standard Playwright browser engine")
     args = arguments.parse_args()
-    report = asyncio.run(run_probe(headless=not args.headed, via_home=args.via_home))
+    report = asyncio.run(run_probe(headless=not args.headed, via_home=args.via_home, browser=args.browser))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     content = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
     args.output.write_text(content, encoding="utf-8")
