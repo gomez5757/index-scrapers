@@ -80,8 +80,9 @@ def test_report_url_drops_credentials_and_query_tokens():
 
 
 @pytest.mark.parametrize("headless", [True, False])
-def test_driver_failure_still_produces_a_report_without_raw_error(monkeypatch, headless):
-    async def fail(playwright, report, *, headless):
+@pytest.mark.parametrize("via_home", [True, False])
+def test_driver_failure_still_produces_a_report_without_raw_error(monkeypatch, headless, via_home):
+    async def fail(playwright, report, *, headless, via_home):
         raise RuntimeError("secret?token=do-not-log")
 
     class FakeManager:
@@ -96,11 +97,12 @@ def test_driver_failure_still_produces_a_report_without_raw_error(monkeypatch, h
     monkeypatch.setitem(sys.modules, "playwright", ModuleType("playwright"))
     monkeypatch.setitem(sys.modules, "playwright.async_api", fake_api)
     monkeypatch.setattr(probe, "observe", fail)
-    result = asyncio.run(probe.run_probe(headless=headless))
+    result = asyncio.run(probe.run_probe(headless=headless, via_home=via_home))
     assert result["status"] == "error"
     assert result["reason"] == "runtime_error"
     assert result["error_type"] == "RuntimeError"
     assert result["headless"] is headless
+    assert result["navigation_mode"] == ("via_home" if via_home else "direct")
     assert "do-not-log" not in str(result)
 
 
@@ -159,3 +161,234 @@ def test_browser_uses_a_clean_context_one_navigation_and_stops_on_block(monkeypa
     assert report["status"] == "blocked"
     assert [call[0] for call in calls] == ["new_context", "goto", "close"]
     assert calls[1][1] == probe.TARGET_URL
+
+
+@pytest.mark.parametrize("href,expected", [
+    ("/alquiler-viviendas/?campaign=public#section", probe.RENT_DIRECTORY_URL),
+    ("madrid-madrid/?campaign=public", probe.TARGET_URL),
+    ("https://other.example/alquiler-viviendas/", None),
+    ("https://user:secret@www.idealista.com/alquiler-viviendas/", None),
+    ("javascript:alert(1)", None),
+    (None, None),
+])
+def test_published_link_normalization_rejects_external_or_authenticated_urls(href, expected):
+    assert probe.navigation_url(href, probe.RENT_DIRECTORY_URL) == expected
+
+
+def fake_route(monkeypatch, documents):
+    fake_api = ModuleType("playwright.async_api")
+    fake_api.TimeoutError = type("FakeTimeoutError", (Exception,), {})
+    monkeypatch.setitem(sys.modules, "playwright", ModuleType("playwright"))
+    monkeypatch.setitem(sys.modules, "playwright.async_api", fake_api)
+    calls = []
+
+    class Collection:
+        def __init__(self, items=()):
+            self.items = list(items)
+
+        async def count(self):
+            return len(self.items)
+
+        def nth(self, index):
+            return self.items[index]
+
+    class ConsentButton:
+        async def inner_text(self):
+            return page.document["consent_button"]
+
+        async def is_visible(self):
+            return True
+
+        async def click(self, **kwargs):
+            calls.append(("consent_click", page.document["consent_button"]))
+            page.document["consent"] = False
+
+    class ConsentDialog:
+        async def is_visible(self):
+            return True
+
+        async def inner_text(self):
+            return "Consentimiento para cookies"
+
+        def get_by_role(self, role):
+            assert role == "button"
+            return Collection([ConsentButton()] if page.document.get("consent_button") else [])
+
+    class Anchor:
+        def __init__(self, href):
+            self.href = href
+
+        async def get_attribute(self, name):
+            assert name == "href"
+            return self.href
+
+        async def is_visible(self):
+            return True
+
+        async def click(self, **kwargs):
+            calls.append(("click", self.href))
+            expected = probe.navigation_url(self.href, page.url)
+            page.index += 1
+            assert expected.rstrip("/") == probe.public_url(page.url).rstrip("/")
+            page.emit_response()
+
+    class Page:
+        index = 0
+        main_frame = object()
+        response_callback = None
+
+        @property
+        def document(self):
+            return documents[self.index]
+
+        @property
+        def url(self):
+            return self.document["url"]
+
+        def on(self, event, callback):
+            assert event == "response"
+            self.response_callback = callback
+
+        def emit_response(self):
+            request = type("Request", (), {"is_navigation_request": lambda self: True})()
+            response = type("Response", (), {"status": self.document.get("http_status", 200), "frame": self.main_frame, "request": request})()
+            self.response_callback(response)
+            return response
+
+        async def goto(self, url, **kwargs):
+            assert url == probe.HOME_URL
+            calls.append(("goto", url))
+            return self.emit_response()
+
+        async def content(self):
+            return self.document.get("html", "<body>Public rental directory</body>")
+
+        async def title(self):
+            return "idealista"
+
+        def locator(self, selector):
+            if selector == "a[href]":
+                return Collection(Anchor(href) for href in self.document.get("links", []))
+            if selector.startswith('[role="dialog"]') and self.document.get("consent"):
+                return Collection([ConsentDialog()])
+            return Collection()
+
+        async def wait_for_url(self, predicate, **kwargs):
+            assert kwargs == {"wait_until": "domcontentloaded", "timeout": 15000}
+            assert predicate(self.url)
+
+        async def wait_for_selector(self, selector, **kwargs):
+            assert selector == probe.READY_SELECTOR
+            assert kwargs == {"state": "visible", "timeout": 10000}
+            calls.append(("readiness",))
+            self.document["html"] = self.document["ready_html"]
+
+    page = Page()
+
+    class Context:
+        async def new_page(self):
+            return page
+
+    class Browser:
+        async def new_context(self, *args, **kwargs):
+            assert args == () and kwargs == {}
+            return Context()
+
+        async def close(self):
+            calls.append(("close",))
+
+    class Chromium:
+        async def launch(self, **kwargs):
+            assert kwargs == {"headless": False, "timeout": 10000}
+            return Browser()
+
+    playwright = type("Playwright", (), {"chromium": Chromium()})()
+    report = {"http_status": None, "trace": []}
+    return playwright, report, calls
+
+
+@pytest.mark.parametrize("directory", [True, False])
+def test_via_home_follows_two_or_three_published_documents_and_only_parses_target(monkeypatch, directory):
+    target_html = (ROOT / "tests/fixtures/idealista.synthetic.html").read_text(encoding="utf-8")
+    documents = [{"url": probe.HOME_URL, "links": ["/alquiler-viviendas/" if directory else "/alquiler-viviendas/madrid-madrid/?campaign=public"]}]
+    if directory:
+        documents.append({"url": probe.RENT_DIRECTORY_URL, "links": ["madrid-madrid/?campaign=public"]})
+    documents.append({"url": probe.TARGET_URL + "?campaign=public", "html": target_html})
+    parser = probe.parse
+    parsed = []
+
+    def parse_target(portal, html, context):
+        assert html == target_html
+        parsed.append(html)
+        return parser(portal, html, context)
+
+    monkeypatch.setattr(probe, "parse", parse_target)
+    playwright, report, calls = fake_route(monkeypatch, documents)
+    asyncio.run(probe.observe(playwright, report, headless=False, via_home=True))
+    assert report["status"] == "accessible" and report["listing_count"] == 1
+    assert len(parsed) == 1
+    assert [entry["step"] for entry in report["trace"]] == (["home", "intermediate", "target"] if directory else ["home", "target"])
+    assert all(entry["http_status"] == 200 and "?" not in entry["url"] for entry in report["trace"])
+    assert [call for call in calls if call[0] == "goto"] == [("goto", probe.HOME_URL)]
+    assert len([call for call in calls if call[0] == "click"]) == len(documents) - 1
+
+
+def test_via_home_waits_for_target_readiness_and_updates_trace(monkeypatch):
+    target_html = (ROOT / "tests/fixtures/idealista.synthetic.html").read_text(encoding="utf-8")
+    documents = [
+        {"url": probe.HOME_URL, "links": ["/alquiler-viviendas/madrid-madrid/"]},
+        {"url": probe.TARGET_URL, "html": "<body>Loading listings</body>", "ready_html": target_html},
+    ]
+    playwright, report, calls = fake_route(monkeypatch, documents)
+    asyncio.run(probe.observe(playwright, report, headless=False, via_home=True))
+    assert report["status"] == "accessible" and report["listing_count"] == 1
+    assert [call for call in calls if call[0] == "readiness"] == [("readiness",)]
+    assert report["trace"][-1] == {"step": "target", "url": probe.TARGET_URL, "http_status": 200, "status": "accessible", "reason": "parsed_listings"}
+
+
+@pytest.mark.parametrize("blocked_document", [0, 1])
+@pytest.mark.parametrize("http_status", [200, 403])
+def test_via_home_never_clicks_after_a_challenge(monkeypatch, blocked_document, http_status):
+    documents = [
+        {"url": probe.HOME_URL, "links": ["/alquiler-viviendas/"]},
+        {"url": probe.RENT_DIRECTORY_URL, "links": ["madrid-madrid/"]},
+    ]
+    documents[blocked_document].update(http_status=http_status, html="<body>Please enable JS and disable any ad blocker</body>")
+    monkeypatch.setattr(probe, "parse", lambda *args: pytest.fail("A challenge or directory must not parse listings"))
+    playwright, report, calls = fake_route(monkeypatch, documents)
+    asyncio.run(probe.observe(playwright, report, headless=False, via_home=True))
+    assert report["status"] == "blocked"
+    assert len(report["trace"]) == blocked_document + 1
+    assert len([call for call in calls if call[0] == "click"]) == blocked_document
+    assert calls[-1] == ("close",)
+
+
+def test_via_home_reports_missing_link_and_sanitized_observed_rental_paths(monkeypatch):
+    documents = [{"url": probe.HOME_URL, "links": ["/alquiler-viviendas/madrid-provincia/?token=transient", "https://other.example/alquiler-viviendas/"]}]
+    playwright, report, calls = fake_route(monkeypatch, documents)
+    asyncio.run(probe.observe(playwright, report, headless=False, via_home=True))
+    assert report["status"] == "inconclusive" and report["reason"] == "link_missing"
+    assert report["listing_count"] is None
+    assert report["observed_rental_paths"] == ["https://www.idealista.com/alquiler-viviendas/madrid-provincia/"]
+    assert not [call for call in calls if call[0] == "click"]
+
+
+def test_unknown_consent_requires_intervention_without_forcing_buttons(monkeypatch):
+    documents = [{"url": probe.HOME_URL, "links": ["/alquiler-viviendas/"], "consent": True, "consent_button": "Aceptar todas"}]
+    playwright, report, calls = fake_route(monkeypatch, documents)
+    asyncio.run(probe.observe(playwright, report, headless=False, via_home=True))
+    assert report["status"] == "blocked" and report["reason"] == "consent_required"
+    assert not [call for call in calls if call[0] in {"click", "consent_click"}]
+
+
+def test_optional_consent_is_rejected_only_by_an_observed_public_button(monkeypatch):
+    target_html = (ROOT / "tests/fixtures/idealista.synthetic.html").read_text(encoding="utf-8")
+    documents = [
+        {"url": probe.HOME_URL, "links": ["/alquiler-viviendas/madrid-madrid/"], "consent": True, "consent_button": "Rechazar todas"},
+        {"url": probe.TARGET_URL, "html": target_html},
+    ]
+    playwright, report, calls = fake_route(monkeypatch, documents)
+    asyncio.run(probe.observe(playwright, report, headless=False, via_home=True))
+    assert report["status"] == "accessible"
+    assert report["consent_actions"] == ["rejected_optional"]
+    assert [call for call in calls if call[0] == "consent_click"] == [("consent_click", "Rechazar todas")]
