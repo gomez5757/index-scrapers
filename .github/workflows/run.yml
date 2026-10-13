@@ -88,9 +88,31 @@ jobs:
             const artifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, {...context.repo, per_page: 100});
             const states = artifacts.filter(a => a.name.startsWith('index-state-') && !a.expired
               && a.workflow_run?.head_branch === context.payload.repository.default_branch
-              && a.workflow_run?.head_repository_id === context.payload.repository.id)
-              .sort((a,b) => b.id-a.id);
-            for (const artifact of states.slice(3)) {
+              && a.workflow_run?.repository_id === context.payload.repository.id
+              && a.workflow_run?.head_repository_id === context.payload.repository.id);
+            const groups = new Map();
+            for (const artifact of states) {
+              const timestamp = Date.parse(artifact.created_at);
+              if (!Number.isFinite(timestamp)) throw new Error('invalid snapshot timestamp');
+              if (!groups.has(timestamp)) groups.set(timestamp, []);
+              groups.get(timestamp).push(artifact);
+            }
+            const ordered = [];
+            for (const [, group] of [...groups].sort((a, b) => b[0] - a[0])) {
+              if (group.length > 1) {
+                const names = group.map(a => /^index-state-([0-9]+)-([0-9]+)-(pre|final)$/.exec(a.name));
+                const sameAttempt = names.every(match => match
+                  && match[1] === names[0][1] && match[2] === names[0][2])
+                  && new Set(names.map(match => match[3])).size === group.length;
+                if (sameAttempt) {
+                  group.sort((a, b) => Number(b.name.endsWith('-final')) - Number(a.name.endsWith('-final')));
+                } else if (ordered.length < 3 && ordered.length + group.length > 3) {
+                  throw new Error('ambiguous snapshot order at retention boundary');
+                }
+              }
+              ordered.push(...group);
+            }
+            for (const artifact of ordered.slice(3)) {
               await github.rest.actions.deleteArtifact({...context.repo, artifact_id: artifact.id});
             }
       - name: Report anomalies without secrets

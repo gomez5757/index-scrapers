@@ -1,11 +1,13 @@
 """Consistent versioned snapshots; failed restoration never starts an empty queue."""
 import gzip
 from contextlib import closing
+from datetime import datetime
 import hashlib
 import io
 import json
 import os
 from pathlib import Path
+import re
 import sqlite3
 from zipfile import ZipFile, BadZipFile
 
@@ -18,6 +20,24 @@ MAX_STATE_BYTES = 64 * 1024 * 1024
 
 class StateUnavailable(RuntimeError):
     pass
+
+
+def _latest_snapshot(artifacts):
+    try:
+        dated = [(datetime.fromisoformat(item["created_at"]), item) for item in artifacts]
+        if any(timestamp.tzinfo is None for timestamp, _ in dated):
+            raise ValueError("snapshot timestamp has no timezone")
+    except (KeyError, TypeError, ValueError) as exc:
+        raise StateUnavailable("invalid snapshot timestamp; refused rollback") from exc
+    latest_time = max(timestamp for timestamp, _ in dated)
+    latest = [item for timestamp, item in dated if timestamp == latest_time]
+    if len(latest) == 1:
+        return latest[0]
+    names = [re.fullmatch(r"index-state-([0-9]+)-([0-9]+)-(pre|final)", item["name"]) for item in latest]
+    if (not all(names) or len({match.groups()[:2] for match in names}) != 1
+            or len({match[3] for match in names}) != len(latest)):
+        raise StateUnavailable("latest snapshot order ambiguous; recover a snapshot explicitly")
+    return next(item for item, match in zip(latest, names) if match[3] == "final")
 
 
 def restore(client, repository, token, path, initialize=False, default_branch="main"):
@@ -44,7 +64,7 @@ def restore(client, repository, token, path, initialize=False, default_branch="m
     available = [item for item in available if (item.get("workflow_run") or {}).get("head_branch") == default_branch and (item.get("workflow_run") or {}).get("repository_id") == (item.get("workflow_run") or {}).get("head_repository_id") and (item.get("workflow_run") or {}).get("repository_id") is not None]
     if not available:
         raise StateUnavailable("state namespace exists but has no trusted production snapshot")
-    latest = max(available, key=lambda item: (item["created_at"], item["id"]))
+    latest = _latest_snapshot(available)
     if latest["expired"]:
         raise StateUnavailable("latest state expired; recover a snapshot explicitly")
     response = client.get(f"https://api.github.com/repos/{repository}/actions/artifacts/{latest['id']}/zip", headers=headers, follow_redirects=True)
