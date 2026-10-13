@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "scope": "national target route discovery, owned staging files only",
+  "verified_at": "2026-10-13T08:35:36.431896+00:00",
+  "red": [
+    {
+      "command": "python -m pytest tests/test_target_discovery.py --collect-only -q",
+      "exit_code": 2,
+      "diagnostic": "ModuleNotFoundError: No module named index_scrapers.target_discovery, before implementation"
+    },
+    {
+      "command": "python -m pytest tests/test_target_discovery.py::test_real_habitaclia_province_traverses_comarcas_without_assigning_municipality -q",
+      "runner_job_id": "837df8682e64215e743a",
+      "exit_code": 1,
+      "diagnostic": "assert 0 == 9, before adding observed comarca frontier"
+    },
+    {
+      "command": "python -m pytest tests/test_target_discovery.py -q -k lock",
+      "runner_job_id": "c69dc263afc8e36dd404",
+      "launch_token": "61e904b12061432e95975fa4bf310886",
+      "exit_code": 1,
+      "result": "2 failed, 2 passed, 27 deselected in 3.30s",
+      "diagnostic": "Output checkpoint.json.lock was accepted and then removed in finally; function ValueError and CLI SystemExit were both absent",
+      "network_note": "The initial CLI RED lacked MockTransport and made five bounded public HTTP requests. Corrected to MockTransport before GREEN. The function RED used no seeds and no network."
+    }
+  ],
+  "intermediate_failure": {
+    "exit_code": 1,
+    "result": "1 failed, 19 passed",
+    "diagnosis": "Deterministic-order test compared source hashes after reversing HTML; source hash must differ. Test changed to compare route and provenance order while preserving actual source SHA256."
+  },
+  "green": {
+    "command": "python -m pytest tests/test_target_discovery.py -q",
+    "runner_job_id": "eb11dc035b70a2a49cc4",
+    "launch_token": "53f8cfa4ca1041d3bd3e725f88ecd7ef",
+    "exit_code": 0,
+    "result": "31 passed in 4.40s",
+    "started_at": "2026-10-13T08:33:24.044724+00:00",
+    "finished_at": "2026-10-13T08:33:30.485113+00:00",
+    "network_requests": 0
+  },
+  "replay": {
+    "mode": "fixture_replay",
+    "network_requests": 0,
+    "fixture_requests": 7,
+    "summary": {
+      "pages_this_run": 7,
+      "pages_total": 7,
+      "frontier_pending": 299,
+      "targets_observed": 179,
+      "excluded": 276,
+      "gaps": [
+        {
+          "portal": "idealista",
+          "url": "https://www.idealista.com/alquiler-viviendas/",
+          "depth": 0,
+          "retrieved_at": "2026-10-13T07:51:21.006747+00:00",
+          "status": 403,
+          "outcome": "blocked"
+        },
+        {
+          "portal": "pisoscom",
+          "url": "https://www.pisos.com/",
+          "depth": 0,
+          "retrieved_at": "2026-10-13T07:51:21.016773+00:00",
+          "outcome": "network_error",
+          "error_type": "ReadError"
+        }
+      ],
+      "national_complete": false
+    },
+    "pairs_by_portal_operation": {
+      "idealista": {
+        "rent": 0,
+        "sale": 0
+      },
+      "pisoscom": {
+        "rent": 0,
+        "sale": 0
+      },
+      "fotocasa": {
+        "rent": 57,
+        "sale": 17
+      },
+      "habitaclia": {
+        "rent": 0,
+        "sale": 105
+      }
+    },
+    "capital_municipalities_observed": 27,
+    "production_config_sha256_unchanged": "2ef12f65a97c3cb80fb4c8bd93241dee562dad9042a44937a13e366b222fb0c5"
+  },
+  "sha256": {
+    "src/index_scrapers/target_discovery.py": "7363ad785031cb2fda226bfa4317a6a61f07d9c527813d24a2b075e8120358db",
+    "scripts/discover_targets.py": "2f3bcfeff886f4830fc567eefcb19df94e07b2ef72bd27c790ab030d56819cd5",
+    "tests/test_target_discovery.py": "66d078849b1924a96b9887e8c537f2f369d0244e872afa5b4a23774e2c8f82eb",
+    "tests/fixtures/targets/boe-capitals.html": "2041b5862c611f296586f9a353b2ea724254d2aa6463e0c88bbbdf1da3e14718",
+    "tests/fixtures/targets/fotocasa.directory.html": "69a7eceac25393da5a196c272edcbb1ebb4d56b8b6b334902853320b58fd1da1",
+    "tests/fixtures/targets/fotocasa.province.directory.html": "6073bf9980401474fd50e470616139e78de7e04eaf5c1c8814f61bc6b30164a5",
+    "tests/fixtures/targets/habitaclia.area.directory.html": "450789de623aaa36e7020c662476c4965d3711f519f71b295aacab02d76f52dc",
+    "tests/fixtures/targets/habitaclia.directory.html": "304a593c28ce461827701d5fb7fedf7b1f1816d6da945c3626ff04d3b357be6e",
+    "tests/fixtures/targets/habitaclia.province.directory.html": "f9efb0a8942f7aa6f9113dc571cc81933e19ec18d087616cf014b940415ee079",
+    "tests/fixtures/targets/idealista.directory.html": "28939c1a69f4f3564abd7a05ebec4656bc2f7d6fb3d99e290f87b22beeedd564",
+    "tests/fixtures/targets/ine-provinces.directory.html": "47aa7f7e5d80d3af6a22bb2369ebf8bc86ae58a3400caeaa07e145763004f428",
+    "tests/fixtures/targets/observed-targets.json": "34b2dcbc3b8e21cd6affb18505c207723715431671e4814e3693b4d96042c18d",
+    "tests/fixtures/targets/README.md": "91accb8f5fa583cb8754c056231418265fa039596bab11eadf96769480501a52",
+    "tests/fixtures/targets/replay.checkpoint.json": "6b2340f62cefe806f744da1e7917561ebf8edc8d8ebfd6dcca110f68fa2a2a11",
+    "tests/fixtures/targets/replay.summary.json": "d0fe194507cb51b4c759773bb664ba6cf10ed62324b85624a4a412865bc324b1",
+    "tests/fixtures/targets/sources.json": "3306989367c6d9aea7e314ed83dcb05175cb37241cf434fda337e032879a5965"
+  },
+  "review": "New staging files are outside the tracked root diff. Reviewed the literal implementation and focused tests; no production config, existing CLI or workflow writes.",
+  "previous_green": [
+    {
+      "command": "python -m pytest tests/test_target_discovery.py -q",
+      "runner_job_id": "9f51831ac26da387e000",
+      "launch_token": "e26d4c60f28c498080e385842172af61",
+      "exit_code": 0,
+      "result": "29 passed in 4.51s",
+      "started_at": "2026-10-13T07:50:20.541504+00:00",
+      "finished_at": "2026-10-13T07:50:26.987585+00:00"
+    }
+  ],
+  "review_fix": {
+    "issue": "output path may collide with checkpoint lock",
+    "change": "Reject resolved output == resolved checkpoint.lock before directory creation or lock acquisition in library and CLI",
+    "registry_changed": false,
+    "changed_paths": [
+      "scripts/discover_targets.py",
+      "src/index_scrapers/target_discovery.py",
+      "tests/test_target_discovery.py"
+    ]
+  },
+  "checkpoint_http_contract_proposed": {
+    "implemented": false,
+    "current_checkpoint_ready_for_external_actions_restore": false,
+    "schema_version": 2,
+    "requirements": [
+      "Persist execution_mode=http|fixture_replay and parser revision with input fingerprints; reject cross-mode, incompatible revision and schema-1 resumes before fetching, writing or emitting.",
+      "Restore only an artifact from the designated producer workflow; verify producer run/commit and artifact digest supplied by Actions outside checkpoint content. Bound JSON size, arrays and strings.",
+      "Validate all frontier, targets, pages and excluded records: types/enums, known portal, HTTPS exact host for actionable URLs, operation, province/INE consistency, unique keys and coherent HTTP outcomes. Recompute name/slug/priority from trusted geography; excluded unsafe hrefs remain bounded diagnostic strings, never actionable URLs.",
+      "Require each target provenance href joined to its allowed source to equal the target URL, source_sha256 to equal a parsed HTTP200 source page, and its INE/operation to match the municipal route. Reject the whole checkpoint on contradiction; regenerate deterministic output from validated records."
+    ]
+  }
+}

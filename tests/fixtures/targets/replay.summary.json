@@ -1,0 +1,51 @@
+{
+  "mode": "fixture_replay",
+  "network_requests": 0,
+  "fixture_requests": 7,
+  "summary": {
+    "pages_this_run": 7,
+    "pages_total": 7,
+    "frontier_pending": 299,
+    "targets_observed": 179,
+    "excluded": 276,
+    "gaps": [
+      {
+        "portal": "idealista",
+        "url": "https://www.idealista.com/alquiler-viviendas/",
+        "depth": 0,
+        "retrieved_at": "2026-10-13T07:51:21.006747+00:00",
+        "status": 403,
+        "outcome": "blocked"
+      },
+      {
+        "portal": "pisoscom",
+        "url": "https://www.pisos.com/",
+        "depth": 0,
+        "retrieved_at": "2026-10-13T07:51:21.016773+00:00",
+        "outcome": "network_error",
+        "error_type": "ReadError"
+      }
+    ],
+    "national_complete": false
+  },
+  "pairs_by_portal_operation": {
+    "idealista": {
+      "rent": 0,
+      "sale": 0
+    },
+    "pisoscom": {
+      "rent": 0,
+      "sale": 0
+    },
+    "fotocasa": {
+      "rent": 57,
+      "sale": 17
+    },
+    "habitaclia": {
+      "rent": 0,
+      "sale": 105
+    }
+  },
+  "capital_municipalities_observed": 27,
+  "production_config_sha256_unchanged": "2ef12f65a97c3cb80fb4c8bd93241dee562dad9042a44937a13e366b222fb0c5"
+}

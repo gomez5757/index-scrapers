@@ -1,0 +1,130 @@
+{
+  "initial_network_failures": [
+    {
+      "portal": "idealista",
+      "requested_url": "https://www.idealista.com/alquiler-viviendas/",
+      "error": "ConnectError",
+      "retrieved_at": "2026-10-13T07:26:09.844579+00:00"
+    },
+    {
+      "portal": "pisoscom",
+      "requested_url": "https://www.pisos.com/",
+      "error": "ConnectError",
+      "retrieved_at": "2026-10-13T07:26:09.846756+00:00"
+    },
+    {
+      "portal": "fotocasa",
+      "requested_url": "https://www.fotocasa.es/es/viviendas-de-alquiler-en-espana",
+      "error": "ConnectError",
+      "retrieved_at": "2026-10-13T07:26:09.849153+00:00"
+    },
+    {
+      "portal": "habitaclia",
+      "requested_url": "https://www.habitaclia.com/",
+      "error": "ConnectError",
+      "retrieved_at": "2026-10-13T07:26:09.850992+00:00"
+    }
+  ],
+  "pages": [
+    {
+      "portal": "idealista",
+      "requested_url": "https://www.idealista.com/alquiler-viviendas/",
+      "url": "https://www.idealista.com/alquiler-viviendas/",
+      "status": 403,
+      "retrieved_at": "2026-10-13T07:27:33.061336+00:00",
+      "file": "idealista.directory.html",
+      "sha256": "28939c1a69f4f3564abd7a05ebec4656bc2f7d6fb3d99e290f87b22beeedd564",
+      "method": "plain-httpx; no cookies; no redirect follow; bounded public directory probe"
+    },
+    {
+      "portal": "pisoscom",
+      "requested_url": "https://www.pisos.com/",
+      "error": "ReadError",
+      "retrieved_at": "2026-10-13T07:27:33.123827+00:00"
+    },
+    {
+      "portal": "fotocasa",
+      "requested_url": "https://www.fotocasa.es/es/viviendas-de-alquiler-en-espana",
+      "url": "https://www.fotocasa.es/es/viviendas-de-alquiler-en-espana",
+      "status": 200,
+      "retrieved_at": "2026-10-13T07:27:33.156945+00:00",
+      "file": "fotocasa.directory.html",
+      "sha256": "69a7eceac25393da5a196c272edcbb1ebb4d56b8b6b334902853320b58fd1da1",
+      "method": "plain-httpx; no cookies; no redirect follow; bounded public directory probe"
+    },
+    {
+      "portal": "habitaclia",
+      "requested_url": "https://www.habitaclia.com/",
+      "url": "https://www.habitaclia.com/",
+      "status": 200,
+      "retrieved_at": "2026-10-13T07:27:33.497911+00:00",
+      "file": "habitaclia.directory.html",
+      "sha256": "304a593c28ce461827701d5fb7fedf7b1f1816d6da945c3626ff04d3b357be6e",
+      "method": "plain-httpx; no cookies; no redirect follow; bounded public directory probe"
+    },
+    {
+      "portal": "ine-provinces",
+      "requested_url": "https://www.ine.es/daco/daco42/codmun/cod_provincia.htm",
+      "url": "https://www.ine.es/daco/daco42/codmun/cod_provincia.htm",
+      "status": 200,
+      "retrieved_at": "2026-10-13T07:27:33.090660+00:00",
+      "file": "ine-provinces.directory.html",
+      "sha256": "47aa7f7e5d80d3af6a22bb2369ebf8bc86ae58a3400caeaa07e145763004f428",
+      "method": "plain-httpx; no cookies; no redirect follow; bounded public directory probe"
+    },
+    {
+      "source": "boe-capitals",
+      "requested_url": "https://www.boe.es/diario_boe/txt.php?id=BOE-A-2025-25362",
+      "url": "https://www.boe.es/diario_boe/txt.php?id=BOE-A-2025-25362",
+      "status": 200,
+      "retrieved_at": "2026-10-13T07:29:28.623489+00:00",
+      "file": "boe-capitals.html",
+      "sha256": "2041b5862c611f296586f9a353b2ea724254d2aa6463e0c88bbbdf1da3e14718",
+      "method": "plain-httpx; bounded official capital table probe"
+    },
+    {
+      "portal": "fotocasa",
+      "requested_url": "https://www.fotocasa.es/es/alquiler/viviendas/girona-provincia/todas-las-zonas/l",
+      "url": "https://www.fotocasa.es/es/alquiler/viviendas/girona-provincia/todas-las-zonas/l",
+      "status": 200,
+      "retrieved_at": "2026-10-13T07:43:01.997303+00:00",
+      "file": "fotocasa.province.directory.html",
+      "sha256": "6073bf9980401474fd50e470616139e78de7e04eaf5c1c8814f61bc6b30164a5",
+      "method": "plain-httpx; no cookies; no redirect follow; bounded public directory probe",
+      "discovered_from": "https://www.fotocasa.es/es/viviendas-de-alquiler-en-espana",
+      "source_sha256": "69a7eceac25393da5a196c272edcbb1ebb4d56b8b6b334902853320b58fd1da1",
+      "href": "https://www.fotocasa.es/es/alquiler/viviendas/girona-provincia/todas-las-zonas/l"
+    },
+    {
+      "portal": "habitaclia",
+      "requested_url": "https://www.habitaclia.com/comprar/viviendas/alicante-provincia/s",
+      "url": "https://www.habitaclia.com/comprar/viviendas/alicante-provincia/s",
+      "status": 200,
+      "retrieved_at": "2026-10-13T07:43:01.971204+00:00",
+      "file": "habitaclia.province.directory.html",
+      "sha256": "f9efb0a8942f7aa6f9113dc571cc81933e19ec18d087616cf014b940415ee079",
+      "method": "plain-httpx; no cookies; no redirect follow; bounded public directory probe",
+      "discovered_from": "https://www.habitaclia.com/",
+      "source_sha256": "304a593c28ce461827701d5fb7fedf7b1f1816d6da945c3626ff04d3b357be6e",
+      "href": "/comprar/viviendas/alicante-provincia/s"
+    },
+    {
+      "portal": "habitaclia",
+      "requested_url": "https://www.habitaclia.com/comprar/viviendas/alicante-provincia/vega-baja/s",
+      "url": "https://www.habitaclia.com/comprar/viviendas/alicante-provincia/vega-baja/s",
+      "status": 200,
+      "retrieved_at": "2026-10-13T07:47:39.535763+00:00",
+      "file": "habitaclia.area.directory.html",
+      "sha256": "450789de623aaa36e7020c662476c4965d3711f519f71b295aacab02d76f52dc",
+      "method": "plain-httpx; no cookies; no redirect follow; bounded public directory probe",
+      "discovered_from": "https://www.habitaclia.com/comprar/viviendas/alicante-provincia/s",
+      "source_sha256": "f9efb0a8942f7aa6f9113dc571cc81933e19ec18d087616cf014b940415ee079",
+      "href": "/comprar/viviendas/alicante-provincia/vega-baja/s"
+    }
+  ],
+  "capture_wrapper_failure": {
+    "job_id": "72dfa247e0fbea980bb0",
+    "exit_code": 1,
+    "cause": "CP1252 stdout UnicodeEncodeError after all captured files and sources.json were persisted; hashes confirmed locally; no network retry"
+  }
+}
