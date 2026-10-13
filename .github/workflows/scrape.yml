@@ -64,5 +64,5 @@ jobs:
       mode: ${{ needs.task.outputs.mode }}
       operation: ${{ needs.task.outputs.operation }}
       initialize_state: ${{ github.event_name == 'workflow_dispatch' && inputs.initialize_state }}
-      delivery_limit: ${{ github.event_name == 'workflow_dispatch' && inputs.delivery_limit || 100 }}
+      delivery_limit: ${{ fromJSON(github.event_name == 'workflow_dispatch' && github.event.inputs.delivery_limit || '100') }}
     secrets: inherit
