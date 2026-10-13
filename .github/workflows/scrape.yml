@@ -10,7 +10,7 @@ on:
     inputs:
       mode:
         type: choice
-        options: [initial, discover, prices, withdrawals]
+        options: [initial, discover, prices, withdrawals, deliver]
         default: initial
       operation:
         type: choice
@@ -20,6 +20,10 @@ on:
         description: 'Sólo primera ejecución: crear catálogo vacío si nunca hubo snapshot'
         type: boolean
         default: false
+      delivery_limit:
+        description: 'Máximo de anuncios entregados; 5 para el primer lote de validación'
+        type: number
+        default: 100
 concurrency:
   group: index-durable-state
   cancel-in-progress: false
@@ -60,4 +64,5 @@ jobs:
       mode: ${{ needs.task.outputs.mode }}
       operation: ${{ needs.task.outputs.operation }}
       initialize_state: ${{ github.event_name == 'workflow_dispatch' && inputs.initialize_state }}
+      delivery_limit: ${{ github.event_name == 'workflow_dispatch' && inputs.delivery_limit || 100 }}
     secrets: inherit

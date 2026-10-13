@@ -11,6 +11,9 @@ on:
       initialize_state:
         type: boolean
         default: false
+      delivery_limit:
+        type: number
+        default: 100
     secrets:
       INGEST_URL:
         required: true
@@ -29,6 +32,7 @@ jobs:
       TASK_MODE: ${{ inputs.mode }}
       OPERATION: ${{ inputs.operation }}
       INITIALIZE: ${{ inputs.initialize_state }}
+      DELIVERY_LIMIT: ${{ inputs.delivery_limit }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -63,7 +67,7 @@ jobs:
           compression-level: 0
       - id: deliver
         if: ${{ always() && steps.upload_prepare.outcome == 'success' }}
-        run: python -m index_scrapers.cli deliver --health delivery-health.json
+        run: python -m index_scrapers.cli deliver --limit "$DELIVERY_LIMIT" --health delivery-health.json
       - id: snapshot
         if: ${{ always() && steps.restore.outcome == 'success' }}
         run: python -m index_scrapers.cli snapshot

@@ -24,7 +24,7 @@ def main(argv=None):
     parser.add_argument("--initialize", action="store_true")
     parser.add_argument("--no-delivery", action="store_true")
     parser.add_argument("--max-pages", type=int, default=3)
-    parser.add_argument("--limit", type=int, default=100)
+    parser.add_argument("--limit", type=int, default=100, help="Maximum reviewed listings or explicitly delivered items (default: 100)")
     args = parser.parse_args(argv)
     report = {"mode": args.mode, "anomalies": []}
     try:
@@ -55,7 +55,8 @@ def main(argv=None):
                 elif args.mode != "deliver":
                     report.update(review(state, client, args.operation, now, mode=args.mode, limit=args.limit))
                 if not args.no_delivery and args.mode != "health":
-                    report["delivery"] = flush(state, client, os.environ["INGEST_URL"], os.environ["INGEST_TOKEN"])
+                    delivery_options = {"max_items": args.limit} if args.mode == "deliver" else {}
+                    report["delivery"] = flush(state, client, os.environ["INGEST_URL"], os.environ["INGEST_TOKEN"], **delivery_options)
     except Exception as exc:
         report["anomalies"].append({"portal": "runner", "reason": type(exc).__name__})
     path = Path(args.health)

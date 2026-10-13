@@ -47,6 +47,127 @@ def test_cli_delivers_previously_persisted_queue_without_loading_targets(tmp_pat
         assert state.pending() == []
 
 
+def test_cli_deliver_limit_five_preserves_sixth_listing(tmp_path, listing, monkeypatch, capsys):
+    from copy import deepcopy
+    from index_scrapers.cli import main
+    from index_scrapers.state import State
+    import httpx
+
+    monkeypatch.setenv("INGEST_URL", "https://api.example.test/ingest")
+    monkeypatch.setenv("INGEST_TOKEN", "example-test-token")
+    path = tmp_path / "state.sqlite"
+    with State(path) as state:
+        for identifier in range(6):
+            item = deepcopy(listing)
+            item["id"] = f"idealista:{identifier}"
+            state.observe(item)
+    batches = []
+    def endpoint(request):
+        ids = [item["id"] for item in json.loads(request.content)["listings"]]
+        batches.append(ids)
+        return httpx.Response(200, json={"accepted": [{"id": identifier, "outcome": "written"} for identifier in ids],
+            "pending": [], "rows_written": 12, "budget_exhausted": False})
+    original_client = httpx.Client
+    transport = httpx.MockTransport(endpoint)
+    monkeypatch.setattr("index_scrapers.cli.httpx.Client", lambda **kwargs: original_client(transport=transport, **kwargs))
+    report = tmp_path / "health.json"
+    assert main(["deliver", "--limit", "5", "--state", str(path), "--health", str(report)]) == 0
+    assert batches == [["idealista:0", "idealista:1", "idealista:2", "idealista:3", "idealista:4"]]
+    with State(path) as state:
+        assert [item["listing"]["id"] for item in state.pending()] == ["idealista:5"]
+    output = capsys.readouterr().out
+    observed = json.loads(output)
+    assert observed == json.loads(report.read_text())
+    assert observed["delivery"]["accepted"] == 5
+    assert observed["delivery"]["pending"] == 1
+    assert "example-test-token" not in output
+    assert "Authorization" not in output
+
+
+def test_cli_deliver_defaults_to_one_hundred_items(tmp_path, listing, monkeypatch):
+    from copy import deepcopy
+    from index_scrapers.cli import main
+    from index_scrapers.state import State
+    import httpx
+    monkeypatch.setenv("INGEST_URL", "https://api.example.test/ingest")
+    monkeypatch.setenv("INGEST_TOKEN", "example-test-token")
+    path = tmp_path / "state.sqlite"
+    with State(path) as state:
+        for identifier in range(101):
+            item = deepcopy(listing)
+            item["id"] = f"idealista:{identifier}"
+            state.observe(item)
+    delivered = []
+    def endpoint(request):
+        ids = [item["id"] for item in json.loads(request.content)["listings"]]
+        assert len(ids) <= 5
+        delivered.extend(ids)
+        return httpx.Response(200, json={"accepted": [{"id": identifier, "outcome": "written"} for identifier in ids],
+            "pending": [], "rows_written": 12, "budget_exhausted": False})
+    original_client = httpx.Client
+    transport = httpx.MockTransport(endpoint)
+    monkeypatch.setattr("index_scrapers.cli.httpx.Client", lambda **kwargs: original_client(transport=transport, **kwargs))
+    assert main(["deliver", "--state", str(path), "--health", str(tmp_path / "health.json")]) == 0
+    assert len(delivered) == 100
+    with State(path) as state:
+        assert [item["listing"]["id"] for item in state.pending()] == ["idealista:100"]
+
+
+def test_cli_implicit_delivery_keeps_batch_limit_separate_from_review_limit(tmp_path, listing, monkeypatch):
+    from copy import deepcopy
+    from index_scrapers.cli import main
+    from index_scrapers.state import State
+    import httpx
+    monkeypatch.setenv("INGEST_URL", "https://api.example.test/ingest")
+    monkeypatch.setenv("INGEST_TOKEN", "example-test-token")
+    monkeypatch.setattr("index_scrapers.cli.load_targets", lambda *args: [])
+    monkeypatch.setattr("index_scrapers.cli.review", lambda *args, **kwargs: {})
+    path = tmp_path / "state.sqlite"
+    with State(path) as state:
+        for identifier in range(101):
+            item = deepcopy(listing)
+            item["id"] = f"idealista:{identifier}"
+            state.observe(item)
+    delivered = []
+    def endpoint(request):
+        ids = [item["id"] for item in json.loads(request.content)["listings"]]
+        delivered.extend(ids)
+        return httpx.Response(200, json={"accepted": [{"id": identifier, "outcome": "written"} for identifier in ids],
+            "pending": [], "rows_written": 12, "budget_exhausted": False})
+    original_client = httpx.Client
+    monkeypatch.setattr("index_scrapers.cli.httpx.Client", lambda **kwargs: original_client(transport=httpx.MockTransport(endpoint), **kwargs))
+    assert main(["prices", "--limit", "1", "--state", str(path), "--health", str(tmp_path / "health.json")]) == 0
+    assert len(delivered) == 101
+    with State(path) as state:
+        assert state.pending_count() == 0
+
+
+def test_cli_delivery_failure_reports_type_without_request_credentials(tmp_path, listing, monkeypatch, capsys):
+    from index_scrapers.cli import main
+    from index_scrapers.state import State
+    import httpx
+    secret = "secret-delivery-token-that-must-not-appear"
+    monkeypatch.setenv("INGEST_URL", "https://api.example.test/ingest")
+    monkeypatch.setenv("INGEST_TOKEN", secret)
+    path = tmp_path / "state.sqlite"
+    with State(path) as state:
+        state.observe(listing)
+    def endpoint(request):
+        raise httpx.RequestError(f"Authorization: Bearer {secret}", request=request)
+    original_client = httpx.Client
+    monkeypatch.setattr("index_scrapers.cli.httpx.Client", lambda **kwargs: original_client(transport=httpx.MockTransport(endpoint), **kwargs))
+    report = tmp_path / "health.json"
+    assert main(["deliver", "--limit", "5", "--state", str(path), "--health", str(report)]) == 1
+    output = capsys.readouterr().out
+    assert json.loads(output) == json.loads(report.read_text())
+    assert json.loads(output)["anomalies"] == [{"portal": "runner", "reason": "RequestError"}]
+    assert secret not in output
+    assert "Authorization" not in output
+    assert secret not in report.read_text()
+    with State(path) as state:
+        assert state.pending_count() == 1
+
+
 @pytest.mark.parametrize("no_delivery", [True, False])
 def test_health_checks_new_real_listings_without_changing_catalog_queue_or_progress(tmp_path, listing, monkeypatch, no_delivery):
     from index_scrapers.cli import main

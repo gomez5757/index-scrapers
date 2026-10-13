@@ -19,7 +19,7 @@ python -m index_scrapers.cli snapshot
 
 Para entregar a la API se definen `INGEST_URL` (URL HTTPS completa de `/ingest`) e `INGEST_TOKEN` en el entorno, o en GitHub Actions Secrets. No se guardan en archivos ni en argumentos. `python -m index_scrapers.cli deliver` entrega la cola ya persistida sin volver a extraer. El contrato privado completo vive en `index-web/docs/codex/INGEST.md`.
 
-La CLI también admite `discover`, `prices`, `withdrawals`, `health`, `restore` y `snapshot`. `--max-pages` limita páginas por destino; `--limit` limita fichas revisadas por ejecución. Un informe `health.json` recoge cero resultados, datos incompletos y errores por tipo, sin cuerpos HTTP ni secretos. Un error da salida 1; la cola conserva lo pendiente.
+La CLI también admite `discover`, `prices`, `withdrawals`, `health`, `restore` y `snapshot`. `--max-pages` limita páginas por destino; `--limit` limita fichas revisadas por ejecución y, en `deliver`, revisiones enviadas de la cola (100 por defecto; `deliver --limit 5` envía como máximo cinco y conserva el resto). Las entregas implícitas mantienen el máximo anterior de 100 lotes de hasta cinco elementos. Un informe `health.json` recoge cero resultados, datos incompletos y errores por tipo, sin cuerpos HTTP ni secretos; la CLI imprime el mismo informe JSON para diagnóstico. Un error da salida 1; la cola conserva lo pendiente.
 
 ## Catálogo, deduplicación y entrega
 
@@ -34,6 +34,8 @@ Un anuncio se retira después de dos HTTP 404/410 consecutivos, incluso entre ru
 ## Actions y persistencia
 
 Los workflows `scrape.yml` y `health.yml` comparten un único grupo de concurrencia, `queue: max` y `cancel-in-progress: false`. El workflow reutilizable `run.yml` sólo opera en la rama por defecto. Los PR ejecutan exclusivamente tests y no publican estado.
+
+Para entregar manualmente como máximo cinco revisiones pendientes desde `Collect Index`, se seleccionan `mode=deliver` y `delivery_limit=5`. Este modo restaura y entrega la cola persistida sin volver a extraer; las revisiones restantes se conservan en el snapshot FINAL.
 
 Cada run restaura el último snapshot de la rama por defecto y del propio repositorio, comprueba SHA-256 e integridad SQLite y aborta si falta, está corrupto o caducó. No vuelve a un estado viejo ni crea un catálogo vacío automáticamente. En la primera ejecución manual de `Collect Index` se activa `initialize_state`; sólo se permite si nunca hubo un snapshot. Para una recuperación posterior se necesita una copia válida, sin reinicializar la cola.
 

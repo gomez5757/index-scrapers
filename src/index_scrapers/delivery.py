@@ -5,16 +5,23 @@ class InvalidAcknowledgement(ValueError):
     pass
 
 
-def flush(state, client, endpoint, token, max_batches=100):
+def flush(state, client, endpoint, token, max_batches=100, max_items=None):
+    if max_items is not None and (type(max_items) is not int or max_items < 1):
+        raise ValueError("max_items must be a positive integer")
     if urlsplit(endpoint).scheme != "https" or not token:
         raise ValueError("ingest requires HTTPS and a token")
     total = 0
     rows = 0
     exhausted = False
+    sent_count = 0
     for _ in range(max_batches):
-        batch = state.pending()
+        batch_size = 5 if max_items is None else min(5, max_items - sent_count)
+        if batch_size <= 0:
+            break
+        batch = state.pending(batch_size)
         if not batch:
             break
+        sent_count += len(batch)
         response = client.post(endpoint, json={"listings": [item["listing"] for item in batch]}, headers={"Authorization": f"Bearer {token}"})
         response.raise_for_status()
         try:

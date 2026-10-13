@@ -83,3 +83,84 @@ def test_pending_count_includes_queue_beyond_first_batch(tmp_path, listing):
             state.observe(item)
         result = flush(state, client, "https://api.example.test/ingest", "example-test-token")
         assert result["pending"] == 7
+
+
+@pytest.mark.parametrize("limit,batch_sizes", [(1, [1]), (2, [2]), (3, [3]), (4, [4]), (5, [5]), (7, [5, 2])])
+def test_max_items_caps_total_and_final_batch_without_dropping_remaining(tmp_path, listing, limit, batch_sizes):
+    from index_scrapers.delivery import flush
+    from index_scrapers.state import State
+    import json
+    batches = []
+    def endpoint(request):
+        ids = [item["id"] for item in json.loads(request.content)["listings"]]
+        batches.append(ids)
+        return httpx.Response(200, json=response(ids, []))
+    with State(tmp_path / "state.sqlite") as state, httpx.Client(transport=httpx.MockTransport(endpoint)) as client:
+        for identifier in range(8):
+            item = deepcopy(listing)
+            item["id"] = f"idealista:{identifier}"
+            state.observe(item)
+        result = flush(state, client, "https://api.example.test/ingest", "example-test-token", max_items=limit)
+        assert [len(batch) for batch in batches] == batch_sizes
+        assert [identifier for batch in batches for identifier in batch] == [f"idealista:{identifier}" for identifier in range(limit)]
+        assert result["accepted"] == limit
+        assert result["pending"] == 8 - limit
+        assert state.pending_count() == 8 - limit
+        assert state.pending()[0]["listing"]["id"] == f"idealista:{limit}"
+    with State(tmp_path / "state.sqlite") as state:
+        assert state.pending_count() == 8 - limit
+        assert state.pending()[0]["listing"]["id"] == f"idealista:{limit}"
+
+
+@pytest.mark.parametrize("limit", [0, -1, True, False, 1.5])
+def test_invalid_max_items_cannot_deliver_or_ack_pending(tmp_path, listing, limit):
+    from index_scrapers.delivery import flush
+    from index_scrapers.state import State
+    def endpoint(request):
+        raise AssertionError("invalid item limit must not send HTTP")
+    with State(tmp_path / "state.sqlite") as state, httpx.Client(transport=httpx.MockTransport(endpoint)) as client:
+        state.observe(listing)
+        before = state.pending()
+        with pytest.raises(ValueError):
+            flush(state, client, "https://api.example.test/ingest", "example-test-token", max_items=limit)
+        assert state.pending() == before
+
+
+def test_max_items_preserves_existing_max_batches_guard(tmp_path, listing):
+    from index_scrapers.delivery import flush
+    from index_scrapers.state import State
+    import json
+    def endpoint(request):
+        ids = [item["id"] for item in json.loads(request.content)["listings"]]
+        return httpx.Response(200, json=response(ids, []))
+    with State(tmp_path / "state.sqlite") as state, httpx.Client(transport=httpx.MockTransport(endpoint)) as client:
+        for identifier in range(8):
+            item = deepcopy(listing)
+            item["id"] = f"idealista:{identifier}"
+            state.observe(item)
+        result = flush(state, client, "https://api.example.test/ingest", "example-test-token", max_batches=1, max_items=7)
+        assert result["accepted"] == 5
+        assert state.pending_count() == 3
+
+
+def test_unbounded_item_delivery_still_stops_after_one_hundred_batches(tmp_path, listing):
+    from index_scrapers.delivery import flush
+    from index_scrapers.state import State
+    import json
+    batches = []
+    def endpoint(request):
+        ids = [item["id"] for item in json.loads(request.content)["listings"]]
+        batches.append(ids)
+        return httpx.Response(200, json=response(ids, []))
+    with State(tmp_path / "state.sqlite") as state, httpx.Client(transport=httpx.MockTransport(endpoint)) as client:
+        for identifier in range(501):
+            item = deepcopy(listing)
+            item["id"] = f"idealista:{identifier}"
+            state.observe(item)
+        result = flush(state, client, "https://api.example.test/ingest", "example-test-token")
+        assert len(batches) == 100
+        assert all(len(batch) == 5 for batch in batches)
+        assert result["accepted"] == 500
+        assert result["pending"] == 1
+    with State(tmp_path / "state.sqlite") as state:
+        assert [item["listing"]["id"] for item in state.pending()] == ["idealista:500"]
