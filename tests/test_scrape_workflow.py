@@ -48,3 +48,34 @@ def test_reusable_delivery_limit_is_a_number(event_name, event_inputs, expected)
     actual = json.loads(result.stdout)
     assert type(actual) is int
     assert actual == expected
+
+
+@pytest.mark.parametrize(
+    ("cron", "expected"),
+    [
+        ("3,13,23,33,43,53 * * * *", ["discover", "rent"]),
+        ("7,37 * * * *", ["discover", "sale"]),
+        ("11 */6 * * *", ["prices", "rent"]),
+        ("17 2 * * *", ["prices", "sale"]),
+        ("23 * * * *", ["withdrawals", "all"]),
+    ],
+)
+def test_schedules_select_the_correct_mode_and_operation(cron, expected):
+    workflow = (Path(__file__).parents[1] / ".github/workflows/scrape.yml").read_text(encoding="utf-8")
+    assert f"    - cron: '{cron}'" in workflow
+    script = workflow.split("          script: |\n", 1)[1].split("\n  collect:", 1)[0]
+    node = shutil.which("node")
+    assert node, "Node.js is required to evaluate the workflow selection"
+    result = subprocess.run(
+        [node, "-e", """
+            const vm = require('node:vm');
+            const outputs = {};
+            vm.runInNewContext(process.argv[1], {
+                context: {eventName: 'schedule', payload: {schedule: process.argv[2]}},
+                core: {setOutput: (key, value) => { outputs[key] = value; }}
+            });
+            process.stdout.write(JSON.stringify([outputs.mode, outputs.operation]));
+        """, script, cron],
+        check=True, capture_output=True, text=True,
+    )
+    assert json.loads(result.stdout) == expected

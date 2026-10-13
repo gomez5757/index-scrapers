@@ -1,6 +1,7 @@
 """Transactional catalogue and append-only delivery queue in one durable SQLite file."""
 import hashlib
 from contextlib import closing
+from datetime import datetime, timedelta
 import json
 from pathlib import Path
 import sqlite3
@@ -24,11 +25,14 @@ class State:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.executescript("""
-            CREATE TABLE IF NOT EXISTS catalog(id TEXT PRIMARY KEY,payload TEXT NOT NULL,fingerprint TEXT NOT NULL,misses INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS catalog(id TEXT PRIMARY KEY,payload TEXT NOT NULL,fingerprint TEXT NOT NULL,misses INTEGER NOT NULL DEFAULT 0,first_missing_at TEXT);
             CREATE TABLE IF NOT EXISTS queue(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL,payload TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS queue_id ON queue(id,seq);
             CREATE TABLE IF NOT EXISTS progress(key TEXT PRIMARY KEY,value TEXT NOT NULL);
         """)
+        if "first_missing_at" not in {row["name"] for row in self.db.execute("PRAGMA table_info(catalog)")}:
+            with self.db:
+                self.db.execute("ALTER TABLE catalog ADD COLUMN first_missing_at TEXT")
 
     def __enter__(self):
         return self
@@ -47,7 +51,7 @@ class State:
                 current["first_seen"] = old["first_seen"]
             digest = fingerprint(current)
             changed = previous is None or previous["fingerprint"] != digest
-            self.db.execute("INSERT INTO catalog(id,payload,fingerprint) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,fingerprint=excluded.fingerprint,misses=0", (current["id"], encode(current), digest))
+            self.db.execute("INSERT INTO catalog(id,payload,fingerprint) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,fingerprint=excluded.fingerprint,misses=0,first_missing_at=NULL", (current["id"], encode(current), digest))
             if changed:
                 wire = {key: value for key, value in current.items() if key != "photo_hash"}
                 self.db.execute("INSERT INTO queue(id,payload) VALUES(?,?)", (current["id"], encode(wire)))
@@ -72,20 +76,34 @@ class State:
     def pending_count(self):
         return self.db.execute("SELECT count(*) FROM queue").fetchone()[0]
 
+    def missing_checks(self, operation=None):
+        pending = []
+        for row in self.db.execute("SELECT payload,first_missing_at FROM catalog WHERE first_missing_at IS NOT NULL"):
+            listing = json.loads(row["payload"])
+            if listing["status"] == "active" and (operation is None or listing["property"]["operation"] == operation):
+                pending.append({"listing": listing, "first_missing_at": row["first_missing_at"]})
+        return pending
+
     def check(self, identifier, status, now):
         with self.db:
-            found = self.db.execute("SELECT payload,misses FROM catalog WHERE id=?", (identifier,)).fetchone()
+            found = self.db.execute("SELECT payload,misses,first_missing_at FROM catalog WHERE id=?", (identifier,)).fetchone()
             if not found:
                 raise KeyError(identifier)
             listing = json.loads(found["payload"])
-            misses = found["misses"] + 1 if status in {404, 410} else 0
+            first_missing_at = found["first_missing_at"] if status in {404, 410} else None
+            misses = 0
+            if status in {404, 410}:
+                # Legacy misses have no timestamp and cannot prove the one-hour gap.
+                first_missing_at = first_missing_at or now
+                elapsed = datetime.fromisoformat(now.replace("Z", "+00:00")) - datetime.fromisoformat(first_missing_at.replace("Z", "+00:00"))
+                misses = 2 if found["first_missing_at"] and elapsed >= timedelta(hours=1) else 1
             listing["last_checked"] = now
             changed = misses >= 2 and listing["status"] != "removed"
             if changed:
                 listing["status"] = "removed"
                 wire = {key: value for key, value in listing.items() if key != "photo_hash"}
                 self.db.execute("INSERT INTO queue(id,payload) VALUES(?,?)", (identifier, encode(wire)))
-            self.db.execute("UPDATE catalog SET payload=?,fingerprint=?,misses=? WHERE id=?", (encode(listing), fingerprint(listing), misses, identifier))
+            self.db.execute("UPDATE catalog SET payload=?,fingerprint=?,misses=?,first_missing_at=? WHERE id=?", (encode(listing), fingerprint(listing), misses, first_missing_at, identifier))
             return changed
 
     def backup(self, path):

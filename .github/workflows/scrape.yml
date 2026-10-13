@@ -5,7 +5,9 @@ on:
     - cron: '7,37 * * * *'
     - cron: '11 */6 * * *'
     - cron: '17 2 * * *'
-    - cron: '23 3 * * *'
+    # The durable runner starts a sweep every 12 h; intervening runs only
+    # continue its bounded cursor and retry explicit missing responses after 1 h.
+    - cron: '23 * * * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -49,7 +51,7 @@ jobs:
               '7,37 * * * *': ['discover', 'sale'],
               '11 */6 * * *': ['prices', 'rent'],
               '17 2 * * *': ['prices', 'sale'],
-              '23 3 * * *': ['withdrawals', 'all']
+              '23 * * * *': ['withdrawals', 'all']
             };
             const selected = context.eventName === 'schedule'
               ? schedule[context.payload.schedule]

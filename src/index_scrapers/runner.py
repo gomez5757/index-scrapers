@@ -276,11 +276,40 @@ def stage(state, candidate, now):
     return state.observe(candidate)
 
 
+def _sweep_candidates(catalog, missing, sweep):
+    if sweep["complete"]:
+        return []
+    skipped = {item["listing"]["id"] for item in missing} | set(sweep["checked"])
+    return sorted((row for row in catalog if (sweep["cursor"] is None or row["id"] > sweep["cursor"]) and row["id"] <= sweep["upper_bound"] and row["id"] not in skipped), key=lambda row: row["id"])
+
+
+def _due_rechecks(missing, now):
+    current_time = datetime.fromisoformat(now.replace("Z", "+00:00"))
+    due = [item for item in missing if current_time - datetime.fromisoformat(item["first_missing_at"].replace("Z", "+00:00")) >= timedelta(hours=1)]
+    return sorted(due, key=lambda item: (datetime.fromisoformat(item["first_missing_at"].replace("Z", "+00:00")), item["listing"]["id"]))
+
+
 def review(state, client, operation, now, mode="prices", limit=100):
+    if limit < 1:
+        raise ValueError("review limit must be positive")
     report = {"checked": 0, "changed": 0, "anomalies": []}
     catalog = [row for row in state.catalog() if row["status"] == "active" and (operation is None or row["property"]["operation"] == operation)]
-    catalog.sort(key=lambda row: (row["last_checked"], row["id"]))
-    for known in catalog[:limit]:
+    if mode == "withdrawals":
+        key = f"withdrawals:{operation or 'all'}"
+        sweep = state.progress(key)
+        elapsed = datetime.fromisoformat(now.replace("Z", "+00:00")) - datetime.fromisoformat(sweep["started_at"].replace("Z", "+00:00")) if sweep else None
+        if sweep is None or (sweep["complete"] and elapsed >= timedelta(hours=12)):
+            sweep = {"started_at": now, "cursor": None, "upper_bound": max((row["id"] for row in catalog), default=""), "checked": [], "complete": not catalog}
+            state.progress(key, sweep)
+        missing = state.missing_checks(operation)
+        due = _due_rechecks(missing, now)
+        selected = [(item["listing"], False) for item in due[:limit]]
+        selected += [(row, True) for row in _sweep_candidates(catalog, missing, sweep)[:limit - len(selected)]]
+    else:
+        catalog.sort(key=lambda row: (row["last_checked"], row["id"]))
+        selected = [(row, False) for row in catalog[:limit]]
+    for known, in_sweep in selected:
+        handled = False
         try:
             response = client.get(known["url"], follow_redirects=True)
             if trusted_url(known["portal"], str(response.url)) != trusted_url(known["portal"], known["url"]):
@@ -288,11 +317,13 @@ def review(state, client, operation, now, mode="prices", limit=100):
             report["checked"] += 1
             if response.status_code in {404, 410}:
                 report["changed"] += int(state.check(known["id"], response.status_code, now))
+                handled = True
                 continue
             if response.status_code != 200:
                 raise PortalBlocked(f"http_{response.status_code}")
             rows = parse(known["portal"], response.text, known["property"])
             state.check(known["id"], 200, now)
+            handled = True
             if mode == "prices":
                 found = next((item for item in rows if item["id"] == known["id"]), None)
                 price = found["price"] if found else detail_price(known["portal"], response.text, known["id"])
@@ -304,7 +335,24 @@ def review(state, client, operation, now, mode="prices", limit=100):
                     report["changed"] += int(stage(state, updated, now))
         except (httpx.HTTPError, PortalBlocked) as exc:
             state.check(known["id"], None, now)
+            handled = True
             report["anomalies"].append({"portal": known["portal"], "reason": str(exc) if isinstance(exc, PortalBlocked) else type(exc).__name__})
+        finally:
+            if mode == "withdrawals" and handled:
+                if in_sweep:
+                    sweep["cursor"] = known["id"]
+                    sweep["checked"] = [identifier for identifier in sweep["checked"] if identifier > sweep["cursor"]]
+                elif not sweep["complete"] and (sweep["cursor"] is None or known["id"] > sweep["cursor"]) and known["id"] <= sweep["upper_bound"]:
+                    # A due recheck can run ahead of the cursor; do not check it twice.
+                    sweep["checked"].append(known["id"])
+                state.progress(key, sweep)
+    if mode == "withdrawals":
+        catalog = [row for row in state.catalog() if row["status"] == "active" and (operation is None or row["property"]["operation"] == operation)]
+        missing = state.missing_checks(operation)
+        remaining = len(_sweep_candidates(catalog, missing, sweep))
+        sweep["complete"] = remaining == 0
+        state.progress(key, sweep)
+        report["withdrawals"] = {"sweep_started_at": sweep["started_at"], "sweep_remaining": remaining, "due_rechecks": len(_due_rechecks(missing, now)), "awaiting_rechecks": len(missing), "limit": limit}
     return report
 
 

@@ -179,3 +179,142 @@ def test_initial_pagination_metadata_matches_saved_portal_capture(portal, total,
     from selectolax.parser import HTMLParser
     html = (Path(__file__).parent / f"fixtures/captures/{portal}.http-200.html").read_text(encoding="utf-8")
     assert _pagination(HTMLParser(html), portal) == {"page": 1, "page_size": size, "total_results": total, "total_pages": pages, "has_more": True}
+
+
+def test_withdrawal_recheck_waits_an_hour_without_repeating_the_sweep(tmp_path, listing):
+    from index_scrapers.runner import review
+    from index_scrapers.state import State
+    path = tmp_path / "state.sqlite"
+    visited = []
+    def endpoint(request):
+        visited.append(request.url.path)
+        return httpx.Response(404)
+    with State(path) as state, httpx.Client(transport=httpx.MockTransport(endpoint)) as client:
+        state.observe(listing)
+        state.acknowledge(state.pending(), [listing["id"]])
+        review(state, client, "rent", "2026-10-12T13:00:00.123456Z", mode="withdrawals")
+    with State(path) as state, httpx.Client(transport=httpx.MockTransport(endpoint)) as client:
+        early = review(state, client, "rent", "2026-10-12T14:00:00.123455Z", mode="withdrawals")
+        assert early["checked"] == 0
+        assert state.pending() == []
+        due = review(state, client, "rent", "2026-10-12T14:00:00.123456Z", mode="withdrawals")
+        assert due["checked"] == due["changed"] == 1
+        assert visited == ["/inmueble/10001/"] * 2
+
+
+def test_withdrawal_cursor_resumes_independently_of_price_checks(tmp_path, listing):
+    from index_scrapers.runner import review
+    from index_scrapers.state import State
+    path = tmp_path / "state.sqlite"
+    visited = []
+    def endpoint(request):
+        visited.append(request.url.path)
+        return httpx.Response(200, text='<span class="info-data-price">1250 €</span>')
+    with State(path) as state, httpx.Client(transport=httpx.MockTransport(endpoint)) as client:
+        state.observe(listing)
+        second = deepcopy(listing)
+        second["id"] = "idealista:10002"
+        second["url"] = "https://www.idealista.com/inmueble/10002/"
+        state.observe(second)
+        first = review(state, client, "rent", "2026-10-12T13:00:00Z", mode="withdrawals", limit=1)
+        assert first["withdrawals"]["sweep_remaining"] == 1
+        review(state, client, "rent", "2026-10-12T13:30:00Z", mode="prices", limit=1)
+    with State(path) as state, httpx.Client(transport=httpx.MockTransport(endpoint)) as client:
+        resumed = review(state, client, "rent", "2026-10-12T14:00:00Z", mode="withdrawals", limit=1)
+        assert resumed["withdrawals"]["sweep_remaining"] == 0
+        assert visited == ["/inmueble/10001/", "/inmueble/10002/", "/inmueble/10002/"]
+        assert review(state, client, "rent", "2026-10-12T15:00:00Z", mode="withdrawals")["checked"] == 0
+        assert review(state, client, "rent", "2026-10-13T01:00:00Z", mode="withdrawals")["checked"] == 2
+
+
+def test_due_rechecks_have_priority_respect_limit_and_skip_inactive_or_other_operation(tmp_path, listing):
+    from index_scrapers.runner import review
+    from index_scrapers.state import State
+    visited = []
+    def endpoint(request):
+        visited.append(request.url.path)
+        return httpx.Response(410)
+    path = tmp_path / "state.sqlite"
+    with State(path) as state:
+        for identifier, operation, status in [("10000", "rent", "active"), ("10001", "rent", "active"), ("10002", "rent", "active"), ("10003", "rent", "removed"), ("10004", "sale", "active")]:
+            candidate = deepcopy(listing)
+            candidate.update(id=f"idealista:{identifier}", url=f"https://www.idealista.com/inmueble/{identifier}/", status=status)
+            candidate["property"]["operation"] = operation
+            state.observe(candidate)
+            if identifier != "10000":
+                state.check(candidate["id"], 404, "2026-10-12T13:00:00Z")
+    with State(path) as state, httpx.Client(transport=httpx.MockTransport(endpoint)) as client:
+        report = review(state, client, "rent", "2026-10-12T14:00:00Z", mode="withdrawals", limit=1)
+        assert visited == ["/inmueble/10001/"]
+        assert report["withdrawals"]["due_rechecks"] == 1
+        assert report["withdrawals"]["sweep_remaining"] == 1
+        assert report["withdrawals"]["limit"] == 1
+    with State(path) as state, httpx.Client(transport=httpx.MockTransport(endpoint)) as client:
+        review(state, client, "rent", "2026-10-12T15:00:00Z", mode="withdrawals", limit=1)
+        assert visited[-1] == "/inmueble/10002/"
+        review(state, client, "rent", "2026-10-12T16:00:00Z", mode="withdrawals", limit=1)
+        assert visited[-1] == "/inmueble/10000/"
+
+
+@pytest.mark.parametrize("status", [200, 403, 429, 503, None])
+def test_withdrawal_recheck_recovery_or_temporary_error_does_not_queue_removal(tmp_path, listing, status):
+    from index_scrapers.runner import review
+    from index_scrapers.state import State
+    path = tmp_path / "state.sqlite"
+    with State(path) as state, httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(404))) as client:
+        state.observe(listing)
+        state.acknowledge(state.pending(), [listing["id"]])
+        review(state, client, "rent", "2026-10-12T13:00:00Z", mode="withdrawals")
+    def endpoint(request):
+        if status is None:
+            raise httpx.ReadTimeout("offline fixture", request=request)
+        return httpx.Response(status, text="<html></html>")
+    with State(path) as state, httpx.Client(transport=httpx.MockTransport(endpoint)) as client:
+        report = review(state, client, "rent", "2026-10-12T14:00:00Z", mode="withdrawals")
+        assert report["changed"] == 0
+        assert state.catalog()[0]["status"] == "active"
+        assert state.pending() == []
+        assert state.missing_checks() == []
+        assert review(state, client, "rent", "2026-10-12T15:00:00Z", mode="withdrawals")["checked"] == 0
+
+
+def test_withdrawal_cursor_does_not_skip_an_interrupted_request(tmp_path, listing):
+    from index_scrapers.runner import review
+    from index_scrapers.state import State
+    path = tmp_path / "state.sqlite"
+    visited = []
+    def endpoint(request):
+        visited.append(request.url.path)
+        if len(visited) == 2:
+            raise KeyboardInterrupt
+        return httpx.Response(200, text="<html></html>")
+    with State(path) as state, httpx.Client(transport=httpx.MockTransport(endpoint)) as client:
+        for identifier in ["10001", "10002", "10003"]:
+            candidate = deepcopy(listing)
+            candidate.update(id=f"idealista:{identifier}", url=f"https://www.idealista.com/inmueble/{identifier}/")
+            state.observe(candidate)
+        with pytest.raises(KeyboardInterrupt):
+            review(state, client, "rent", "2026-10-12T13:00:00Z", mode="withdrawals", limit=2)
+    with State(path) as state, httpx.Client(transport=httpx.MockTransport(endpoint)) as client:
+        report = review(state, client, "rent", "2026-10-12T14:00:00Z", mode="withdrawals", limit=2)
+        assert visited == ["/inmueble/10001/", "/inmueble/10002/", "/inmueble/10002/", "/inmueble/10003/"]
+        assert report["withdrawals"]["sweep_remaining"] == 0
+
+
+def test_withdrawal_http_200_captcha_is_a_temporary_error_not_a_success(tmp_path, listing):
+    from index_scrapers.runner import review
+    from index_scrapers.state import State
+    html = (Path(__file__).parent / "fixtures/blocked.synthetic.html").read_text(encoding="utf-8")
+    path = tmp_path / "state.sqlite"
+    with State(path) as state, httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(404))) as client:
+        state.observe(listing)
+        state.acknowledge(state.pending(), [listing["id"]])
+        review(state, client, "rent", "2026-10-12T13:00:00Z", mode="withdrawals")
+    with State(path) as state, httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(200, text=html))) as client:
+        report = review(state, client, "rent", "2026-10-12T14:00:00Z", mode="withdrawals")
+        assert report["anomalies"] == [{"portal": listing["portal"], "reason": "idealista: HTTP challenge"}]
+        assert report["changed"] == 0
+        assert state.catalog()[0]["status"] == "active"
+        assert state.pending() == []
+        assert state.missing_checks() == []
+        assert state.check(listing["id"], 410, "2026-10-12T15:00:00Z") is False
