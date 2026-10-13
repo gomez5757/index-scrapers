@@ -22,6 +22,11 @@ on:
         description: 'Solo acceso directo: esperar hasta 15 s a tarjetas públicas sin interacción'
         type: boolean
         default: false
+      startup_timeout_seconds:
+        description: 'Solo Firefox: margen de arranque de 10 o 60 segundos'
+        type: choice
+        options: ['10', '60']
+        default: '10'
 
 permissions:
   contents: read
@@ -34,6 +39,7 @@ jobs:
       NAVIGATION_MODE: ${{ inputs.navigation_mode }}
       BROWSER_ENGINE: ${{ inputs.browser_engine }}
       WAIT_FOR_RENDER: ${{ inputs.wait_for_render }}
+      STARTUP_TIMEOUT_SECONDS: ${{ inputs.startup_timeout_seconds }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -46,21 +52,26 @@ jobs:
       - name: Install selected browser engine on this runner
         run: |
           case "$BROWSER_ENGINE" in chromium|firefox) ;; *) exit 2 ;; esac
+          case "$STARTUP_TIMEOUT_SECONDS" in 10|60) ;; *) exit 2 ;; esac
           python -m playwright install --with-deps "$BROWSER_ENGINE"
       - name: Observe one public page with a clean headless browser context
         if: ${{ inputs.browser_mode == 'headless' }}
         run: |
           args=(--browser "$BROWSER_ENGINE" --output probe-artifacts/report.json)
+          command_timeout=75
+          if [[ "$BROWSER_ENGINE" == 'firefox' && "$STARTUP_TIMEOUT_SECONDS" == '60' ]]; then args+=(--startup-timeout-seconds 60); command_timeout=125; fi
           if [[ "$NAVIGATION_MODE" == 'via_home' ]]; then args+=(--via-home); fi
           if [[ "$NAVIGATION_MODE" == 'direct' && "$WAIT_FOR_RENDER" == 'true' ]]; then args+=(--wait-for-render); fi
-          timeout --signal=TERM --kill-after=5s 75s python scripts/probe_idealista.py "${args[@]}"
+          timeout --signal=TERM --kill-after=5s "${command_timeout}s" python scripts/probe_idealista.py "${args[@]}"
       - name: Observe one public page with a clean headed browser context
         if: ${{ inputs.browser_mode == 'headed' }}
         run: |
           args=(--browser "$BROWSER_ENGINE" --headed --output probe-artifacts/report.json)
+          command_timeout=75
+          if [[ "$BROWSER_ENGINE" == 'firefox' && "$STARTUP_TIMEOUT_SECONDS" == '60' ]]; then args+=(--startup-timeout-seconds 60); command_timeout=125; fi
           if [[ "$NAVIGATION_MODE" == 'via_home' ]]; then args+=(--via-home); fi
           if [[ "$NAVIGATION_MODE" == 'direct' && "$WAIT_FOR_RENDER" == 'true' ]]; then args+=(--wait-for-render); fi
-          timeout --signal=TERM --kill-after=5s 75s xvfb-run --auto-servernum python scripts/probe_idealista.py "${args[@]}"
+          timeout --signal=TERM --kill-after=5s "${command_timeout}s" xvfb-run --auto-servernum python scripts/probe_idealista.py "${args[@]}"
       - name: Publish observation report
         if: ${{ always() }}
         uses: actions/upload-artifact@v4

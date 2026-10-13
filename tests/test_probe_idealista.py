@@ -83,7 +83,7 @@ def test_report_url_drops_credentials_and_query_tokens():
 @pytest.mark.parametrize("via_home", [True, False])
 @pytest.mark.parametrize("browser", ["chromium", "firefox"])
 def test_driver_failure_still_produces_a_report_without_raw_error(monkeypatch, headless, via_home, browser):
-    async def fail(playwright, report, *, headless, via_home, browser, wait_for_render=False):
+    async def fail(playwright, report, *, headless, via_home, browser, wait_for_render=False, startup_timeout_seconds=10):
         assert browser == report["browser"]
         raise RuntimeError("secret?token=do-not-log")
 
@@ -188,7 +188,7 @@ def test_cli_propagates_browser_engine_headed_and_navigation_mode(monkeypatch, t
     monkeypatch.setattr(sys, "argv", argv)
     monkeypatch.setattr(probe, "run_probe", fake_probe)
     assert probe.main() == 0
-    assert observed == [{"headless": False, "via_home": True, "browser": browser or "chromium", "wait_for_render": False}]
+    assert observed == [{"headless": False, "via_home": True, "browser": browser or "chromium", "wait_for_render": False, "startup_timeout_seconds": 10}]
 
 
 def test_cli_rejects_an_unavailable_browser_engine_before_starting_runtime(monkeypatch):
@@ -369,7 +369,127 @@ def test_cli_propagates_wait_for_render_only_for_direct_navigation(monkeypatch, 
     monkeypatch.setattr(sys, "argv", ["probe", "--headed", "--wait-for-render", "--output", str(tmp_path / "report.json")])
     monkeypatch.setattr(probe, "run_probe", fake_probe)
     assert probe.main() == 0
-    assert observed == [{"headless": False, "via_home": False, "browser": "chromium", "wait_for_render": True}]
+    assert observed == [{"headless": False, "via_home": False, "browser": "chromium", "wait_for_render": True, "startup_timeout_seconds": 10}]
+
+
+def fake_phase_runtime(monkeypatch, *, failed_phase=None, hang_context=False):
+    fake_api = ModuleType("playwright.async_api")
+    fake_api.TimeoutError = type("FakeTimeoutError", (Exception,), {})
+    monkeypatch.setitem(sys.modules, "playwright", ModuleType("playwright"))
+    monkeypatch.setitem(sys.modules, "playwright.async_api", fake_api)
+    calls = []
+
+    def fail_if_requested(phase):
+        if failed_phase == phase:
+            raise fake_api.TimeoutError("bounded simulated phase timeout")
+
+    class EmptyLocator:
+        async def count(self):
+            return 0
+
+    class Page:
+        url = probe.TARGET_URL
+
+        async def goto(self, url, **kwargs):
+            calls.append(("navigation", url, kwargs))
+            fail_if_requested("navigation")
+            return SimpleNamespace(status=403)
+
+        async def content(self):
+            fail_if_requested("render")
+            return "<body>Public page</body>"
+
+        async def title(self):
+            return "idealista"
+
+        def locator(self, selector):
+            return EmptyLocator()
+
+    class Context:
+        async def new_page(self):
+            calls.append(("new_page",))
+            fail_if_requested("new_page")
+            return Page()
+
+    class Browser:
+        async def new_context(self):
+            calls.append(("new_context",))
+            fail_if_requested("new_context")
+            if hang_context:
+                await asyncio.Event().wait()
+            return Context()
+
+        async def close(self):
+            calls.append(("close",))
+            fail_if_requested("close")
+
+    class Engine:
+        async def launch(self, **kwargs):
+            calls.append(("launch", kwargs))
+            fail_if_requested("launch")
+            return Browser()
+
+    playwright = SimpleNamespace(firefox=Engine())
+
+    class Manager:
+        async def __aenter__(self):
+            return playwright
+
+        async def __aexit__(self, *args):
+            return False
+
+    fake_api.async_playwright = Manager
+    return calls
+
+
+@pytest.mark.parametrize("failed_phase", ["launch", "new_context", "new_page", "navigation", "render", "close"])
+def test_phase_diagnostics_attribute_native_timeout_without_assuming_navigation(monkeypatch, failed_phase):
+    calls = fake_phase_runtime(monkeypatch, failed_phase=failed_phase)
+    report = asyncio.run(probe.run_probe(browser="firefox", startup_timeout_seconds=60))
+    assert report["status"] == "error"
+    assert report["timeout_phase"] == failed_phase
+    phase = next(entry for entry in report["phases"] if entry["phase"] == failed_phase)
+    assert phase["status"] == "timeout" and phase["elapsed_seconds"] >= 0
+    assert not [call for call in calls if call[0] == "navigation"] if failed_phase in {"launch", "new_context", "new_page"} else True
+
+
+def test_phase_diagnostics_firefox_startup_margin_and_total_are_bounded(monkeypatch):
+    calls = fake_phase_runtime(monkeypatch)
+    report = asyncio.run(probe.run_probe(browser="firefox", startup_timeout_seconds=60))
+    assert calls[0] == ("launch", {"headless": True, "timeout": 60000})
+    assert report["startup_timeout_seconds"] == 60 and report["timeout_seconds"] == 110
+    assert report["status"] == "blocked" and report["timeout_phase"] is None
+    assert [entry["phase"] for entry in report["phases"]] == ["launch", "new_context", "new_page", "navigation", "render", "close"]
+    assert all(entry["status"] == "completed" for entry in report["phases"])
+
+
+def test_phase_diagnostics_total_deadline_preserves_context_cause_after_close(monkeypatch):
+    calls = fake_phase_runtime(monkeypatch, hang_context=True)
+    monkeypatch.setattr(probe, "TOTAL_TIMEOUT_SECONDS", 0.01)
+    report = asyncio.run(probe.run_probe(browser="firefox"))
+    assert report["reason"] == "total_timeout" and report["timeout_phase"] == "new_context"
+    assert report["phase"] == "close" and calls[-1] == ("close",)
+    assert any(entry["phase"] == "new_context" and entry["status"] == "cancelled" for entry in report["phases"])
+
+
+def test_cli_propagates_firefox_startup_margin(monkeypatch, tmp_path):
+    observed = []
+
+    async def fake_probe(**kwargs):
+        observed.append(kwargs)
+        return {"status": "blocked"}
+
+    monkeypatch.setattr(sys, "argv", ["probe", "--browser", "firefox", "--startup-timeout-seconds", "60", "--output", str(tmp_path / "report.json")])
+    monkeypatch.setattr(probe, "run_probe", fake_probe)
+    assert probe.main() == 0
+    assert observed == [{"headless": True, "via_home": False, "browser": "firefox", "wait_for_render": False, "startup_timeout_seconds": 60}]
+
+
+def test_cli_rejects_extended_startup_margin_for_chromium(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["probe", "--browser", "chromium", "--startup-timeout-seconds", "60"])
+    with pytest.raises(SystemExit) as error:
+        probe.main()
+    assert error.value.code == 2
 
 
 def test_cli_rejects_wait_for_render_with_via_home_before_starting_runtime(monkeypatch):

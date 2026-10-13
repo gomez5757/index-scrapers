@@ -195,9 +195,9 @@ async def observe_via_home(page, report, timeout_error):
 
     page.on("response", record_response)
     try:
-        response = await page.goto(HOME_URL, wait_until="domcontentloaded", timeout=30000)
+        response = await diagnostic_phase(report, "navigation", page.goto(HOME_URL, wait_until="domcontentloaded", timeout=30000), timeout_seconds=30, timeout_error=timeout_error)
     except timeout_error:
-        result = await snapshot(page, document_status["value"], public_navigation=True)
+        result = await diagnostic_phase(report, "render", snapshot(page, document_status["value"], public_navigation=True), timeout_error=timeout_error)
         report.update(result)
         if result["status"] != "blocked":
             report.update(status="error", reason="navigation_timeout")
@@ -206,7 +206,7 @@ async def observe_via_home(page, report, timeout_error):
     document_status["value"] = response.status if response else document_status["value"]
     visited = set()
     for document_index in range(3):
-        result = await snapshot(page, document_status["value"], public_navigation=True)
+        result = await diagnostic_phase(report, "render", snapshot(page, document_status["value"], public_navigation=True), timeout_error=timeout_error)
         report.update(result)
         step = "home" if document_index == 0 else "target" if result["final_url"] and urlsplit(result["final_url"]).path.rstrip("/") == urlsplit(TARGET_URL).path.rstrip("/") else "intermediate"
         trace_document(report, step, result)
@@ -216,10 +216,10 @@ async def observe_via_home(page, report, timeout_error):
         if step == "target":
             if result["status"] == "inconclusive":
                 try:
-                    await page.wait_for_selector(READY_SELECTOR, state="visible", timeout=10000)
+                    await diagnostic_phase(report, "render", page.wait_for_selector(READY_SELECTOR, state="visible", timeout=10000), timeout_seconds=10, timeout_error=timeout_error)
                 except timeout_error:
                     pass
-                result = await snapshot(page, document_status["value"], public_navigation=True)
+                result = await diagnostic_phase(report, "render", snapshot(page, document_status["value"], public_navigation=True), timeout_error=timeout_error)
                 report.update(result)
                 report["trace"][-1].update(url=result["final_url"], http_status=result["http_status"], status=result["status"], reason=result["reason"])
             return
@@ -233,7 +233,7 @@ async def observe_via_home(page, report, timeout_error):
             return
         if consent:
             report.setdefault("consent_actions", []).append(consent)
-            result = await snapshot(page, document_status["value"], public_navigation=True)
+            result = await diagnostic_phase(report, "render", snapshot(page, document_status["value"], public_navigation=True), timeout_error=timeout_error)
             report.update(result)
             report["trace"][-1].update(url=result["final_url"], http_status=result["http_status"], status=result["status"], reason=result["reason"])
             if result["status"] in {"blocked", "error"}:
@@ -248,10 +248,10 @@ async def observe_via_home(page, report, timeout_error):
         previous_url = public_url(page.url)
         document_status["value"] = None
         try:
-            await anchor.click(timeout=10000)
-            await page.wait_for_url(lambda url: public_url(url) != previous_url, wait_until="domcontentloaded", timeout=15000)
+            await diagnostic_phase(report, "navigation", anchor.click(timeout=10000), timeout_seconds=10, timeout_error=timeout_error)
+            await diagnostic_phase(report, "navigation", page.wait_for_url(lambda url: public_url(url) != previous_url, wait_until="domcontentloaded", timeout=15000), timeout_seconds=15, timeout_error=timeout_error)
         except timeout_error:
-            result = await snapshot(page, document_status["value"], public_navigation=True)
+            result = await diagnostic_phase(report, "render", snapshot(page, document_status["value"], public_navigation=True), timeout_error=timeout_error)
             report.update(result)
             if result["status"] != "blocked":
                 report.update(status="error", reason="navigation_timeout")
@@ -262,14 +262,46 @@ async def observe_via_home(page, report, timeout_error):
             return
 
 
-async def observe(playwright, report, *, headless=True, via_home=False, browser="chromium", wait_for_render=False):
+async def diagnostic_phase(report, name, operation, *, timeout_seconds=None, timeout_source="operation", timeout_error=()):
+    started = time.monotonic()
+    if timeout_seconds is None:
+        timeout_seconds = report.get("timeout_seconds", TOTAL_TIMEOUT_SECONDS)
+        timeout_source = "total"
+    entry = {"phase": name, "status": "running", "timeout_seconds": timeout_seconds, "timeout_source": timeout_source}
+    report.setdefault("phases", []).append(entry)
+    report["phase"] = name
+    try:
+        value = await operation
+    except asyncio.CancelledError:
+        entry["status"] = "cancelled"
+        report["failed_phase"] = name
+        if not report.get("cancelled_phase"):
+            report["cancelled_phase"] = name
+        report["timeout_phase"] = report["cancelled_phase"]
+        raise
+    except Exception as error:
+        timed_out = isinstance(error, TimeoutError) or bool(timeout_error) and isinstance(error, timeout_error)
+        entry.update(status="timeout" if timed_out else "failed", error_type=type(error).__name__)
+        report["failed_phase"] = name
+        if timed_out:
+            report["timeout_phase"] = name
+        raise
+    else:
+        entry["status"] = "completed"
+        return value
+    finally:
+        entry["elapsed_seconds"] = round(time.monotonic() - started, 3)
+
+
+async def observe(playwright, report, *, headless=True, via_home=False, browser="chromium", wait_for_render=False, startup_timeout_seconds=10):
     from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
     engine = getattr(playwright, browser)
-    browser = await engine.launch(headless=headless, timeout=10000)
+    browser = await diagnostic_phase(report, "launch", engine.launch(headless=headless, timeout=startup_timeout_seconds * 1000), timeout_seconds=startup_timeout_seconds, timeout_error=PlaywrightTimeoutError)
     try:
-        context = await browser.new_context()
-        page = await context.new_page()
+        total_budget = report.get("timeout_seconds", TOTAL_TIMEOUT_SECONDS)
+        context = await diagnostic_phase(report, "new_context", browser.new_context(), timeout_seconds=total_budget, timeout_source="total", timeout_error=PlaywrightTimeoutError)
+        page = await diagnostic_phase(report, "new_page", context.new_page(), timeout_seconds=total_budget, timeout_source="total", timeout_error=PlaywrightTimeoutError)
         if via_home:
             await observe_via_home(page, report, PlaywrightTimeoutError)
             return
@@ -285,7 +317,7 @@ async def observe(playwright, report, *, headless=True, via_home=False, browser=
             page.on("response", record_response)
         navigation_timed_out = False
         try:
-            response = await page.goto(TARGET_URL, wait_until="domcontentloaded", timeout=30000)
+            response = await diagnostic_phase(report, "navigation", page.goto(TARGET_URL, wait_until="domcontentloaded", timeout=30000), timeout_seconds=30, timeout_error=PlaywrightTimeoutError)
             report["http_status"] = response.status if response else None
         except PlaywrightTimeoutError:
             navigation_timed_out = True
@@ -293,7 +325,7 @@ async def observe(playwright, report, *, headless=True, via_home=False, browser=
             if report["http_status"] is None:
                 report["http_status"] = navigation_status["latest"]
             report["initial_http_status"] = report["http_status"]
-        report.update(await snapshot(page, report["http_status"]))
+        report.update(await diagnostic_phase(report, "render", snapshot(page, report["http_status"]), timeout_error=PlaywrightTimeoutError))
         trace_document(report, "target", report)
         if wait_for_render and not navigation_timed_out:
             if report["http_status"] in {401, 429}:
@@ -305,13 +337,13 @@ async def observe(playwright, report, *, headless=True, via_home=False, browser=
                 report["trace"][-1].update(status="blocked", reason="authentication_required")
                 return
             try:
-                await page.wait_for_selector("article.item", state="visible", timeout=15000)
+                await diagnostic_phase(report, "render", page.wait_for_selector("article.item", state="visible", timeout=15000), timeout_seconds=15, timeout_error=PlaywrightTimeoutError)
             except PlaywrightTimeoutError:
-                report.update(await snapshot(page, report["initial_http_status"]))
+                report.update(await diagnostic_phase(report, "render", snapshot(page, report["initial_http_status"]), timeout_error=PlaywrightTimeoutError))
             else:
                 report["public_render_observed"] = True
                 latest_status = navigation_status["latest"]
-                report.update(await snapshot(page, latest_status if latest_status is not None else report["initial_http_status"]))
+                report.update(await diagnostic_phase(report, "render", snapshot(page, latest_status if latest_status is not None else report["initial_http_status"]), timeout_error=PlaywrightTimeoutError))
             report["trace"][-1].update(url=report["final_url"], http_status=report["http_status"], status=report["status"], reason=report["reason"])
             return
         if report["status"] in {"blocked", "accessible"}:
@@ -322,17 +354,19 @@ async def observe(playwright, report, *, headless=True, via_home=False, browser=
             return
         if report["status"] == "inconclusive":
             try:
-                await page.wait_for_selector(READY_SELECTOR, state="visible", timeout=10000)
+                await diagnostic_phase(report, "render", page.wait_for_selector(READY_SELECTOR, state="visible", timeout=10000), timeout_seconds=10, timeout_error=PlaywrightTimeoutError)
             except PlaywrightTimeoutError:
                 pass
-            report.update(await snapshot(page, report["http_status"]))
+            report.update(await diagnostic_phase(report, "render", snapshot(page, report["http_status"]), timeout_error=PlaywrightTimeoutError))
             report["trace"][-1].update(status=report["status"], reason=report["reason"])
     finally:
-        await asyncio.wait_for(browser.close(), timeout=3)
+        await diagnostic_phase(report, "close", asyncio.wait_for(browser.close(), timeout=3), timeout_seconds=3, timeout_error=PlaywrightTimeoutError)
 
 
-async def run_probe(*, headless=True, via_home=False, browser="chromium", wait_for_render=False):
+async def run_probe(*, headless=True, via_home=False, browser="chromium", wait_for_render=False, startup_timeout_seconds=10):
     started = time.monotonic()
+    startup_timeout_seconds = 60 if browser == "firefox" and startup_timeout_seconds == 60 else 10
+    total_budget = TOTAL_TIMEOUT_SECONDS + startup_timeout_seconds - 10
     try:
         playwright_version = version("playwright")
     except PackageNotFoundError:
@@ -352,16 +386,21 @@ async def run_probe(*, headless=True, via_home=False, browser="chromium", wait_f
         "navigation_mode": "via_home" if via_home else "direct",
         "wait_for_render": wait_for_render,
         "trace": [],
-        "timeout_seconds": TOTAL_TIMEOUT_SECONDS,
+        "startup_timeout_seconds": startup_timeout_seconds,
+        "timeout_seconds": total_budget,
+        "phase": "launch",
+        "failed_phase": None,
+        "timeout_phase": None,
+        "phases": [],
     }
     try:
         from playwright.async_api import async_playwright
 
-        async with asyncio.timeout(TOTAL_TIMEOUT_SECONDS):
+        async with asyncio.timeout(total_budget):
             async with async_playwright() as playwright:
-                await observe(playwright, report, headless=headless, via_home=via_home, browser=browser, wait_for_render=wait_for_render)
+                await observe(playwright, report, headless=headless, via_home=via_home, browser=browser, wait_for_render=wait_for_render, startup_timeout_seconds=startup_timeout_seconds)
     except TimeoutError:
-        report.update(status="error", reason="total_timeout")
+        report.update(status="error", reason="total_timeout", timeout_phase=report.get("cancelled_phase") or report.get("timeout_phase") or report["phase"])
     except Exception as error:
         # Error messages may contain transient URL tokens; retain only the type.
         report.update(status="error", reason="runtime_error", error_type=type(error).__name__)
@@ -376,10 +415,13 @@ def main():
     arguments.add_argument("--via-home", action="store_true", help="Start at the public home page and follow published rental links, at most three documents")
     arguments.add_argument("--browser", choices=["chromium", "firefox"], default="chromium", help="Standard Playwright browser engine")
     arguments.add_argument("--wait-for-render", action="store_true", help="Direct navigation only: passively wait up to 15 seconds for public listing cards")
+    arguments.add_argument("--startup-timeout-seconds", type=int, choices=[10, 60], default=10, help="Firefox only: optional 60-second startup margin; the default is 10 seconds")
     args = arguments.parse_args()
     if args.wait_for_render and args.via_home:
         arguments.error("--wait-for-render is supported only with direct navigation")
-    report = asyncio.run(run_probe(headless=not args.headed, via_home=args.via_home, browser=args.browser, wait_for_render=args.wait_for_render))
+    if args.startup_timeout_seconds != 10 and args.browser != "firefox":
+        arguments.error("The extended startup margin is supported only with Firefox")
+    report = asyncio.run(run_probe(headless=not args.headed, via_home=args.via_home, browser=args.browser, wait_for_render=args.wait_for_render, startup_timeout_seconds=args.startup_timeout_seconds))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     content = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
     args.output.write_text(content, encoding="utf-8")
