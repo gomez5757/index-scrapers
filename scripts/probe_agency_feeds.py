@@ -137,11 +137,18 @@ def html_facts(body, source):
     return facts
 
 
-def challenge(facts):
-    text = " ".join(facts.visible_text).lower()
-    if re.search(r"\bcaptcha\b", text) or any(marker in text for marker in (
+def challenge_signals(facts):
+    text = " ".join(" ".join(facts.visible_text).lower().split())
+    # A CAPTCHA label in an ordinary subscription form does not gate document access.
+    gate = any(marker in text for marker in (
         "verify you are human", "checking your browser", "please enable js and disable any ad blocker",
-    )):
+    )) or bool(re.search(r"\b(?:complete|solve|pass)\s+(?:the\s+)?captcha\s+to\s+(?:continue|proceed|access)\b", text))
+    return {"html_examined": True, "captcha_mentioned": bool(re.search(r"\bcaptcha\b", text)),
+            "verification_gate": gate}
+
+
+def challenge(facts):
+    if challenge_signals(facts)["verification_gate"]:
         return "captcha"
     return "login" if facts.password_input else None
 
@@ -154,7 +161,8 @@ def content_type(response):
 def empty_observation(url):
     return {"url": url, "status": "skipped", "reason": None, "http_status": None,
             "content_type": None, "bytes_read": 0, "sha256": None, "body_complete": False,
-            "error_class": None, "observations": {}}
+            "error_class": None, "observations": {},
+            "signals": {"html_examined": False, "captcha_mentioned": False, "verification_gate": False}}
 
 
 async def fetch_once(result, timeout, transport):
@@ -193,7 +201,11 @@ async def fetch_once(result, timeout, transport):
         is_html = result["content_type"] == "text/html" or bool(
             re.match(br"\s*<(?:!doctype\s+html|html|head|body)(?:\s|>)", body, re.I)
         )
-        reason = challenge(html_facts(body, result["url"])) if is_html else None
+        reason = None
+        if is_html:
+            facts = html_facts(body, result["url"])
+            result["signals"] = challenge_signals(facts)
+            reason = challenge(facts)
         if reason:
             result.update(status="blocked", reason=reason)
         elif not result["body_complete"]:
@@ -497,8 +509,12 @@ def write_report(output, report):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--agency", choices=("all", *(agency["id"] for agency in AGENCIES)), default="all",
+                        help="Select a fixed public agency, or all agencies; arbitrary URLs are not accepted")
     args = parser.parse_args(argv)
-    report = asyncio.run(run_probe())
+    report = asyncio.run(run_probe() if args.agency == "all" else run_probe(
+        agencies=tuple(agency for agency in AGENCIES if agency["id"] == args.agency)
+    ))
     write_report(args.output, report)
     return 0 if report["diagnostic_complete"] else 1
 

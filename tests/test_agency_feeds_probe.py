@@ -106,7 +106,7 @@ def test_blocked_origin_is_not_requested_again(status):
 
 
 @pytest.mark.parametrize("body,reason", [
-    (b"<p>Please complete the CAPTCHA</p>", "captcha"),
+    (b"<p>Please complete the CAPTCHA to continue.</p>", "captcha"),
     (b'<form action="/wp-login.php"><input type="password"></form>', "login"),
 ])
 def test_http_200_challenge_or_login_stops_before_feed(body, reason):
@@ -116,6 +116,40 @@ def test_http_200_challenge_or_login_stops_before_feed(body, reason):
     report, requests, _ = run_documents(targets, content)
     assert len(requests) == 1
     assert report["results"][0]["discovery"]["reason"] == reason
+
+
+def test_newsletter_captcha_label_is_only_a_signal_and_allows_advertised_feed():
+    targets = agencies(1)
+    source = targets[0]["source_url"]
+    content = documents(targets)
+    content[source] = (200, "text/html", b'<main><h1>Spanish Real Estate</h1><nav>For Sale Rentals</nav></main><footer><h3>Subscribe to our Newsletter</h3><form><label>Email*</label><label>CAPTCHA</label><button>Subscribe</button></form></footer><link rel="alternate" type="application/rss+xml" href="/feed/">')
+    report, requests, _ = run_documents(targets, content)
+    discovery = report["results"][0]["discovery"]
+    assert discovery["status"] == "observed"
+    assert discovery["signals"] == {"html_examined": True, "captcha_mentioned": True, "verification_gate": False}
+    assert [str(request.url) for request in requests] == [source, source + "feed/"]
+    assert report["results"][0]["outcome"] == "syndicated_entries_only"
+    assert "Subscribe" not in json.dumps(report)
+
+
+@pytest.mark.parametrize("body,mentioned", [
+    (b'<h1>Verify you are human</h1>', False),
+    (b'<h1>Checking your browser</h1>', False),
+    (b'<h1>Complete the CAPTCHA to continue.</h1>', True),
+])
+def test_explicit_verification_instructions_stop_and_record_boolean_signals(body, mentioned):
+    targets = agencies(1)
+    source = targets[0]["source_url"]
+    content = documents(targets)
+    content[source] = (200, "text/html", body)
+    report, requests, _ = run_documents(targets, content)
+    discovery = report["results"][0]["discovery"]
+    assert discovery["status"] == "blocked"
+    assert discovery["reason"] == "captcha"
+    assert discovery["signals"] == {"html_examined": True, "captcha_mentioned": mentioned, "verification_gate": True}
+    assert len(requests) == 1
+    assert report["results"][0]["resource"] is None
+    assert "Verify you are human" not in json.dumps(report)
 
 
 def test_feed_must_be_explicit_and_safe_not_in_scripts_comments_or_cross_origin():
@@ -295,3 +329,27 @@ def test_atomic_report_and_zero_exit_mean_completed_diagnosis_even_without_catal
     assert probe.main(["--output", str(output)]) == 0
     assert json.loads(output.read_text()) == report
     assert list(tmp_path.iterdir()) == [output]
+
+
+def test_cli_selects_only_the_fixed_public_agency_without_free_urls(monkeypatch, tmp_path):
+    selected = []
+
+    async def fake_probe(*, agencies):
+        selected.extend(agencies)
+        return {"diagnostic_complete": True, "status": "complete", "results": []}
+
+    monkeypatch.setattr(probe, "run_probe", fake_probe)
+    assert probe.main(["--agency", "buena-vida-spain", "--output", str(tmp_path / "report.json")]) == 0
+    assert selected == [next(agency for agency in probe.AGENCIES if agency["id"] == "buena-vida-spain")]
+
+
+@pytest.mark.parametrize("invalid", ["https://private.example/feed/", "unknown-agency"])
+def test_cli_rejects_unlisted_agency_before_any_request(monkeypatch, tmp_path, invalid):
+    async def must_not_run(**kwargs):
+        pytest.fail("Invalid agency must be rejected before probing")
+
+    monkeypatch.setattr(probe, "run_probe", must_not_run)
+    with pytest.raises(SystemExit) as error:
+        probe.main(["--agency", invalid, "--output", str(tmp_path / "report.json")])
+    assert error.value.code == 2
+    assert not (tmp_path / "report.json").exists()

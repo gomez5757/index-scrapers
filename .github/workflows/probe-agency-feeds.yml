@@ -2,6 +2,15 @@ name: Probe advertised agency feeds
 
 on:
   workflow_dispatch:
+    inputs:
+      agency:
+        description: Public agency selection
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - buena-vida-spain
 
 permissions:
   contents: read
@@ -20,7 +29,9 @@ jobs:
       - name: Install existing project dependencies
         run: python -m pip install .
       - name: Diagnose only explicitly advertised public agency resources
-        run: python scripts/probe_agency_feeds.py --output probe-artifacts/agency-feeds.json
+        env:
+          PROBE_AGENCY: ${{ inputs.agency || 'all' }}
+        run: python scripts/probe_agency_feeds.py --agency "$PROBE_AGENCY" --output probe-artifacts/agency-feeds.json
       - name: Publish the observation report only
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
