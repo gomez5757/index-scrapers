@@ -262,7 +262,7 @@ def test_depth_limit_keeps_observed_frontier_for_later_expansion(tmp_path, geogr
         result = run_discovery(client, geography, checkpoint, output, seeds=[root], max_pages=5, max_depth=0)
         assert result["pages_this_run"] == 1
         assert result["frontier_pending"] == 1
-        assert run_discovery(client, geography, checkpoint, output, max_pages=1, max_depth=1)["targets_observed"] == 1
+        assert run_discovery(client, geography, checkpoint, output, seeds=[root], max_pages=1, max_depth=1)["targets_observed"] == 1
     assert calls == [root, province]
 
 
@@ -317,7 +317,7 @@ def test_observed_output_recovers_from_authoritative_checkpoint(tmp_path, geogra
     assert len(json.loads(checkpoint.read_text())["pages"]) == 1
     monkeypatch.setattr(target_discovery, "_atomic_json", original_write)
     with httpx.Client(transport=httpx.MockTransport(lambda r: pytest.fail("Completed pages must not be fetched again"))) as client:
-        result = run_discovery(client, geography, checkpoint, output, max_pages=1, max_depth=0)
+        result = run_discovery(client, geography, checkpoint, output, seeds=[FC + "/"], max_pages=1, max_depth=0)
     assert result["pages_this_run"] == 0
     assert json.loads(output.read_text())["targets"][0]["municipality"] == "17079"
 
@@ -336,3 +336,199 @@ def test_script_reads_existing_slugs_and_runs_with_separate_output(tmp_path, mon
     assert any(t["municipality"] == "28079" and t["city_slug"] == "madrid" for t in observed["targets"])
     assert observed["coverage"]["national_complete"] is False
     assert (ROOT / "config/targets.json").read_bytes() == before
+
+
+def _saved_checkpoint(tmp_path, geography):
+    checkpoint, output = tmp_path / "checkpoint.json", tmp_path / "observed.json"
+    html = f'<a href="{GIRONA}">Girona</a><a href="/es/alquiler/viviendas/girona-provincia/todas-las-zonas/l">Girona</a><a href="/es/alquiler/viviendas/cabanes/todas-las-zonas/l">Cabanes</a><a href="https://evil.test/es/alquiler/viviendas/girona-capital/todas-las-zonas/l">Girona</a>'
+    with httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html))) as client:
+        run_discovery(client, geography, checkpoint, output, seeds=[FC + "/"], max_pages=1, max_depth=0)
+    return checkpoint, output, json.loads(checkpoint.read_text())
+
+
+def test_checkpoint_declares_version_mode_and_parser_fingerprint(tmp_path, geography):
+    checkpoint, output, state = _saved_checkpoint(tmp_path, geography)
+    assert state["schema_version"] == 2
+    assert state["execution_mode"] == "http"
+    assert state["parser_sha256"] == hashlib.sha256((ROOT / "src/index_scrapers/target_discovery.py").read_bytes()).hexdigest()
+    assert json.loads(output.read_text())["execution_mode"] == "http"
+
+
+def test_fixture_replay_cannot_resume_as_http_and_keeps_both_files(tmp_path, geography):
+    checkpoint, output = tmp_path / "checkpoint.json", tmp_path / "observed.json"
+    with httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=f'<a href="{GIRONA}">Girona</a>'))) as client:
+        run_discovery(client, geography, checkpoint, output, seeds=[FC + "/"], max_pages=1, max_depth=0, execution_mode="fixture_replay")
+    before = checkpoint.read_bytes(), output.read_bytes()
+    with httpx.Client(transport=httpx.MockTransport(lambda r: pytest.fail("No fetch before mode validation"))) as client:
+        with pytest.raises(ValueError, match="mode"):
+            run_discovery(client, geography, checkpoint, output, seeds=[FC + "/"], max_pages=1, max_depth=0, execution_mode="http")
+    assert (checkpoint.read_bytes(), output.read_bytes()) == before
+    assert not checkpoint.with_suffix(".json.lock").exists()
+    with httpx.Client(transport=httpx.MockTransport(lambda r: pytest.fail("No fetch at this depth"))) as client:
+        assert run_discovery(client, geography, checkpoint, output, seeds=[FC + "/"], max_pages=1, max_depth=0, execution_mode="fixture_replay")["pages_this_run"] == 0
+    assert json.loads(output.read_text(encoding="utf-8"))["execution_mode"] == "fixture_replay"
+
+
+@pytest.mark.parametrize("collection,path,value", [
+    (None, ["execution_mode"], "fixture_replay"),
+    (None, ["parser_sha256"], "0" * 64),
+    (None, ["schema_version"], 1),
+    (None, ["targets"], {}),
+    ("targets", [0, "url"], "https://evil.test/alquiler/"),
+    ("targets", [0, "operation"], "sale"),
+    ("targets", [0, "municipality"], "28079"),
+    ("targets", [0, "province"], "28"),
+    ("targets", [0, "priority"], "major"),
+    ("targets", [0, "city_slug"], "madrid"),
+    ("targets", [0, "provenance", 0, "href"], "/es/alquiler/viviendas/madrid-capital/todas-las-zonas/l"),
+    ("targets", [0, "provenance", 0, "source_sha256"], "0" * 64),
+    ("targets", [0, "provenance", 0, "discovered_from"], FC + "/not-visited"),
+    ("frontier", [0, "scope"], "unknown"),
+    ("frontier", [0, "operation"], "sale"),
+    ("frontier", [0, "depth"], -1),
+    ("pages", [0, "status"], 403),
+    ("pages", [0, "url"], "https://evil.test/"),
+    ("pages", [0, "retrieved_at"], "invalid-date"),
+    ("excluded", [0, "reason"], "invented-reason"),
+    ("excluded", [0, "source_sha256"], "0" * 64),
+])
+def test_checkpoint_rejects_incoherent_collections_without_writing(tmp_path, geography, collection, path, value):
+    checkpoint, output, state = _saved_checkpoint(tmp_path, geography)
+    node = state if collection is None else state[collection]
+    for key in path[:-1]:
+        node = node[key]
+    node[path[-1]] = value
+    checkpoint.write_text(json.dumps(state), encoding="utf-8")
+    output.write_bytes(b"previous observed output\n")
+    before = checkpoint.read_bytes(), output.read_bytes()
+    with httpx.Client(transport=httpx.MockTransport(lambda r: pytest.fail("No request from rejected checkpoint"))) as client:
+        with pytest.raises(ValueError, match="[Cc]heckpoint"):
+            run_discovery(client, geography, checkpoint, output, max_pages=1, max_depth=0)
+    assert (checkpoint.read_bytes(), output.read_bytes()) == before
+    assert not checkpoint.with_suffix(".json.lock").exists()
+
+
+@pytest.mark.parametrize("collection", ["frontier", "targets", "pages", "excluded"])
+def test_checkpoint_rejects_duplicate_records_in_every_collection(tmp_path, geography, collection):
+    checkpoint, output, state = _saved_checkpoint(tmp_path, geography)
+    state[collection].append(deepcopy(state[collection][0]))
+    checkpoint.write_text(json.dumps(state), encoding="utf-8")
+    before = checkpoint.read_bytes(), output.read_bytes()
+    with httpx.Client(transport=httpx.MockTransport(lambda r: pytest.fail("No request from rejected checkpoint"))) as client:
+        with pytest.raises(ValueError, match="[Cc]heckpoint"):
+            run_discovery(client, geography, checkpoint, output, max_pages=1, max_depth=0)
+    assert (checkpoint.read_bytes(), output.read_bytes()) == before
+
+
+def test_script_rejects_replay_checkpoint_without_http_or_output(tmp_path, geography, monkeypatch, capsys):
+    checkpoint, output, state = _saved_checkpoint(tmp_path, geography)
+    state["execution_mode"] = "fixture_replay"
+    checkpoint.write_text(json.dumps(state), encoding="utf-8")
+    before = checkpoint.read_bytes(), output.read_bytes()
+    spec = importlib.util.spec_from_file_location("discover_targets_script", ROOT / "scripts/discover_targets.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    original_client = httpx.Client
+    transport = httpx.MockTransport(lambda r: pytest.fail("CLI must not fetch from replay checkpoint"))
+    monkeypatch.setattr(module.httpx, "Client", lambda **kwargs: original_client(transport=transport, **kwargs))
+    with pytest.raises(SystemExit):
+        module.main(["--checkpoint", str(checkpoint), "--output", str(output)])
+    assert "mode" in capsys.readouterr().err
+    assert (checkpoint.read_bytes(), output.read_bytes()) == before
+
+
+@pytest.mark.parametrize("collection,field,value", [(None, "schema_version", 2.0), ("frontier", "scope", []), ("pages", "outcome", [])])
+def test_checkpoint_rejects_wrong_schema_or_non_scalar_enums(tmp_path, geography, collection, field, value):
+    checkpoint, output, state = _saved_checkpoint(tmp_path, geography)
+    record = state if collection is None else state[collection][0]
+    record[field] = value
+    checkpoint.write_text(json.dumps(state), encoding="utf-8")
+    before = checkpoint.read_bytes(), output.read_bytes()
+    with httpx.Client(transport=httpx.MockTransport(lambda r: pytest.fail("No request before scalar/type validation"))) as client:
+        with pytest.raises(ValueError, match="[Cc]heckpoint"):
+            run_discovery(client, geography, checkpoint, output, max_pages=1, max_depth=0)
+    assert (checkpoint.read_bytes(), output.read_bytes()) == before
+
+
+@pytest.mark.parametrize("case", ["blocked", "redirect", "http_error", "large", "network", "parsed", "unsupported"])
+def test_valid_terminal_page_outcomes_resume_without_refetch(tmp_path, geography, case):
+    def endpoint(request):
+        if case == "network":
+            raise httpx.ReadError("offline test", request=request)
+        return httpx.Response({"blocked": 403, "redirect": 302, "http_error": 503}.get(case, 200), text="<html></html>" if case != "large" else "x" * 200)
+    checkpoint, output = tmp_path / "checkpoint.json", tmp_path / "observed.json"
+    seed = DEFAULT_SEEDS[0] if case == "unsupported" else FC + "/"
+    with httpx.Client(transport=httpx.MockTransport(endpoint)) as client:
+        run_discovery(client, geography, checkpoint, output, seeds=[seed], max_pages=1, max_page_bytes=100)
+    with httpx.Client(transport=httpx.MockTransport(lambda r: pytest.fail("No refetch of validated terminal page"))) as client:
+        assert run_discovery(client, geography, checkpoint, output, seeds=[seed], max_pages=1)["pages_this_run"] == 0
+
+
+def test_checkpoint_rejects_invented_network_error_type(tmp_path, geography):
+    checkpoint, output = tmp_path / "checkpoint.json", tmp_path / "observed.json"
+    def endpoint(request):
+        raise httpx.ReadError("offline test", request=request)
+    with httpx.Client(transport=httpx.MockTransport(endpoint)) as client:
+        run_discovery(client, geography, checkpoint, output, seeds=[FC + "/"], max_pages=1)
+    state = json.loads(checkpoint.read_text())
+    state["pages"][0]["error_type"] = "InventedError"
+    checkpoint.write_text(json.dumps(state), encoding="utf-8")
+    before = checkpoint.read_bytes(), output.read_bytes()
+    with httpx.Client(transport=httpx.MockTransport(lambda r: pytest.fail("No request from invalid checkpoint"))) as client:
+        with pytest.raises(ValueError, match="checkpoint pages network error"):
+            run_discovery(client, geography, checkpoint, output, max_pages=1)
+    assert (checkpoint.read_bytes(), output.read_bytes()) == before
+
+
+def test_version_two_replay_of_real_captures_resumes_all_179_routes(tmp_path, geography):
+    sources = {s["requested_url"]: s for s in json.loads((FIXTURES / "sources.json").read_text(encoding="utf-8"))["pages"] if s.get("portal") in {"idealista", "pisoscom", "fotocasa", "habitaclia"}}
+    def endpoint(request):
+        source = sources[str(request.url)]
+        if "error" in source:
+            raise httpx.ReadError("captured disconnect", request=request)
+        return httpx.Response(source["status"], content=(FIXTURES / source["file"]).read_bytes())
+    checkpoint, output = tmp_path / "checkpoint.json", tmp_path / "observed.json"
+    with httpx.Client(transport=httpx.MockTransport(endpoint)) as client:
+        result = run_discovery(client, geography, checkpoint, output, seeds=list(sources), max_pages=len(sources), max_depth=0, execution_mode="fixture_replay")
+    assert result["targets_observed"] == 179
+    before = checkpoint.read_bytes()
+    with httpx.Client(transport=httpx.MockTransport(lambda r: pytest.fail("No network/refetch on replay resume"))) as client:
+        result = run_discovery(client, geography, checkpoint, output, seeds=list(sources), max_pages=1, max_depth=0, execution_mode="fixture_replay")
+    assert result["pages_this_run"] == 0
+    assert result["targets_observed"] == 179
+    assert checkpoint.read_bytes() == before
+    assert json.loads(output.read_text(encoding="utf-8"))["execution_mode"] == "fixture_replay"
+
+
+@pytest.mark.parametrize("changed_seeds", [[FC + "/"], [HA + "/", FC + "/"], [FC + "/", HA + "/", DEFAULT_SEEDS[0]], []])
+def test_checkpoint_rejects_changed_seed_inputs_before_lock_or_writes(tmp_path, geography, monkeypatch, changed_seeds):
+    checkpoint, output = tmp_path / "checkpoint.json", tmp_path / "observed.json"
+    with httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text="<html></html>"))) as client:
+        run_discovery(client, geography, checkpoint, output, seeds=[FC + "/", HA + "/"], max_pages=1)
+    before = checkpoint.read_bytes(), output.read_bytes()
+    original_open = Path.open
+    lock = checkpoint.with_name(checkpoint.name + ".lock")
+    def guarded_open(path, *args, **kwargs):
+        if path.resolve() == lock.resolve():
+            pytest.fail("Changed seed inputs must be rejected before lock acquisition")
+        return original_open(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "open", guarded_open)
+    with httpx.Client(transport=httpx.MockTransport(lambda r: pytest.fail("No request from changed seed inputs"))) as client:
+        with pytest.raises(ValueError, match="checkpoint seed"):
+            run_discovery(client, geography, checkpoint, output, seeds=changed_seeds, max_pages=1)
+    assert (checkpoint.read_bytes(), output.read_bytes()) == before
+    assert not lock.exists()
+
+
+def test_checkpoint_accepts_equivalent_normalized_unique_seeds(tmp_path, geography):
+    checkpoint, output = tmp_path / "checkpoint.json", tmp_path / "observed.json"
+    calls = []
+    def endpoint(request):
+        calls.append(str(request.url))
+        return httpx.Response(200, text="<html></html>")
+    with httpx.Client(transport=httpx.MockTransport(endpoint)) as client:
+        run_discovery(client, geography, checkpoint, output, seeds=[FC + "/#a", FC + "/", HA + "/#b"], max_pages=1)
+        result = run_discovery(client, geography, checkpoint, output, seeds=[FC + "/", HA + "/#changed", HA + "/"], max_pages=1)
+    assert calls == [FC + "/", HA + "/"]
+    assert result["pages_total"] == 2
+    assert json.loads(checkpoint.read_text(encoding="utf-8"))["seed_urls"] == [FC + "/", HA + "/"]

@@ -8,6 +8,7 @@ import re
 import unicodedata
 import uuid
 from datetime import datetime, timezone
+from html import escape
 from pathlib import Path
 from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
 
@@ -32,6 +33,8 @@ DEFAULT_SEEDS = (
 PROVINCES_SOURCE = "https://www.ine.es/daco/daco42/codmun/cod_provincia.htm"
 CAPITALS_SOURCE = "https://www.boe.es/diario_boe/txt.php?id=BOE-A-2025-25362"
 OPERATIONS = {"alquiler": "rent", "comprar": "sale"}
+CHECKPOINT_VERSION = 2
+EXECUTION_MODES = {"http", "fixture_replay"}
 
 
 def _name_key(value):
@@ -130,6 +133,18 @@ def _safe_url(href, source, portal):
 def _portal(url):
     host = urlsplit(url).hostname
     return next((portal for portal, hosts in HOSTS.items() if host in hosts), None)
+
+
+def _normalized_seed_urls(seeds):
+    normalized = []
+    for url in seeds:
+        portal = _portal(url)
+        if portal is None:
+            raise ValueError("Seed outside portal allowlist")
+        url = _safe_url(url, url, portal)
+        if url not in normalized:
+            normalized.append(url)
+    return normalized
 
 
 def _route(portal, url, geography):
@@ -290,6 +305,151 @@ def _atomic_json(path, value):
         temporary.unlink(missing_ok=True)
 
 
+def _checkpoint_check(condition, field):
+    if not condition:
+        raise ValueError("Invalid checkpoint " + field)
+
+
+def _checkpoint_url(portal, value, field):
+    _checkpoint_check(isinstance(portal, str) and portal in HOSTS and isinstance(value, str), field)
+    try:
+        canonical = _safe_url(value, value, portal)
+    except ValueError as error:
+        raise ValueError("Invalid checkpoint " + field) from error
+    _checkpoint_check(value == canonical, field)
+
+
+def _evidence_result(evidence, portal, pages, geography):
+    fields = {"discovered_from", "source_sha256", "href", "label"}
+    _checkpoint_check(isinstance(evidence, dict) and fields <= evidence.keys() <= fields | {"directory_group"}, "provenance fields")
+    _checkpoint_check(all(isinstance(value, str) for value in evidence.values()), "provenance types")
+    source = evidence["discovered_from"]
+    _checkpoint_url(portal, source, "provenance source URL")
+    page = pages.get((portal, source))
+    _checkpoint_check(page is not None and page["outcome"] == "parsed" and page["sha256"] == evidence["source_sha256"], "provenance source/hash")
+    anchor = '<a href="' + escape(evidence["href"], quote=True) + '">' + escape(evidence["label"]) + '</a>'
+    if "directory_group" in evidence:
+        anchor = '<div><h3>' + escape(evidence["directory_group"]) + '</h3><div data-testid="internal-links-content-child_areas">' + anchor + '</div></div>'
+    # Re-run the existing route/name rules, not a second permissive matching implementation.
+    result = parse_directory(portal, anchor, source, geography)
+    for key, rows in result.items():
+        for row in rows:
+            if key == "excluded":
+                row["source_sha256"] = evidence["source_sha256"]
+            else:
+                for provenance in row["provenance"]:
+                    provenance["source_sha256"] = evidence["source_sha256"]
+    return result
+
+
+def _record_evidence(row, pages, geography, collection):
+    _checkpoint_check(isinstance(row.get("provenance"), list) and bool(row["provenance"]), collection + " provenance")
+    _checkpoint_check(isinstance(row.get("discovered_from"), list), collection + " discovered_from")
+    results = [_evidence_result(evidence, row["portal"], pages, geography) for evidence in row["provenance"]]
+    _checkpoint_check(row["provenance"] == _unique_rows(row["provenance"]), collection + " duplicate/unordered provenance")
+    _checkpoint_check(row["discovered_from"] == sorted({e["discovered_from"] for e in row["provenance"]}), collection + " source references")
+    return results
+
+
+def _validate_frontier_entry(entry, pages, geography, seeds):
+    _checkpoint_check(isinstance(entry, dict), "frontier record")
+    _checkpoint_url(entry.get("portal"), entry.get("url"), "frontier URL")
+    _checkpoint_check(type(entry.get("depth")) is int and entry["depth"] >= 0, "frontier depth")
+    _checkpoint_check(isinstance(entry.get("scope"), str) and entry["scope"] in {"seed", "country", "province", "area", "municipality"}, "frontier scope")
+    if entry["scope"] == "seed":
+        _checkpoint_check(set(entry) == {"portal", "url", "scope", "depth", "seed_order", "discovered_from", "provenance"}, "seed fields")
+        order = entry["seed_order"]
+        _checkpoint_check(type(order) is int and 0 <= order < len(seeds) and seeds[order] == entry["url"] and entry["depth"] == 0, "seed identity")
+        _checkpoint_check(isinstance(entry["provenance"], list) and isinstance(entry["discovered_from"], list), "seed provenance")
+        if not entry["provenance"]:
+            _checkpoint_check(entry["discovered_from"] == [], "seed source references")
+            return
+    results = _record_evidence(entry, pages, geography, "frontier")
+    for result in results:
+        expected = [row for row in result["frontier"] if row["url"] == entry["url"]]
+        _checkpoint_check(len(expected) == 1, "frontier href/route")
+        if entry["scope"] != "seed":
+            omitted = {"depth", "discovered_from", "provenance"}
+            _checkpoint_check({k: v for k, v in entry.items() if k not in omitted} == {k: v for k, v in expected[0].items() if k not in omitted}, "frontier operation/geography")
+    if entry["scope"] != "seed":
+        _checkpoint_check(entry["depth"] == 1 + min(pages[(entry["portal"], source)]["depth"] for source in entry["discovered_from"]), "frontier source depth")
+
+
+def _validate_checkpoint(state, geography, execution_mode):
+    _checkpoint_check(isinstance(state, dict), "root")
+    if type(state.get("schema_version")) is not int or state["schema_version"] != CHECKPOINT_VERSION:
+        raise ValueError("Unsupported checkpoint schema; version 1 has no execution mode/parser fingerprint. Preserve it and use a separate version 2 checkpoint")
+    _checkpoint_check(state.get("execution_mode") == execution_mode, "execution mode; http and fixture_replay cannot share a checkpoint")
+    _checkpoint_check(state.get("parser_sha256") == hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), "parser fingerprint changed")
+    _checkpoint_check(state.get("geography") == geography.identity(), "geography/input fingerprints changed")
+    _checkpoint_check(set(state) == {"schema_version", "execution_mode", "parser_sha256", "geography", "seed_urls", "frontier", "targets", "pages", "excluded"}, "root fields")
+    _checkpoint_check(isinstance(state["seed_urls"], list) and all(isinstance(url, str) for url in state["seed_urls"]), "seed URLs")
+    _checkpoint_check(len(state["seed_urls"]) == len(set(state["seed_urls"])), "duplicate seed URLs")
+    for url in state["seed_urls"]:
+        _checkpoint_url(_portal(url), url, "seed URL")
+    for collection in ("frontier", "targets", "pages", "excluded"):
+        _checkpoint_check(isinstance(state[collection], list), collection + " collection")
+    pages = {}
+    for page in state["pages"]:
+        required = {"portal", "url", "depth", "retrieved_at", "outcome", "request"}
+        _checkpoint_check(isinstance(page, dict) and required <= page.keys() <= required | {"status", "sha256", "error_type"}, "pages fields")
+        _checkpoint_url(page["portal"], page["url"], "pages URL")
+        _validate_frontier_entry(page["request"], pages, geography, state["seed_urls"])
+        _checkpoint_check(all(page[key] == page["request"][key] for key in ("portal", "url", "depth")), "pages request identity")
+        try:
+            _checkpoint_check(isinstance(page["retrieved_at"], str) and datetime.fromisoformat(page["retrieved_at"]).utcoffset() is not None, "pages timestamp")
+        except (ValueError, TypeError) as error:
+            raise ValueError("Invalid checkpoint pages timestamp") from error
+        status, outcome = page.get("status"), page["outcome"]
+        _checkpoint_check(isinstance(outcome, str), "pages outcome type")
+        if outcome == "network_error":
+            error_type = getattr(httpx, page.get("error_type"), None) if isinstance(page.get("error_type"), str) else None
+            _checkpoint_check(isinstance(error_type, type) and issubclass(error_type, httpx.HTTPError) and "sha256" not in page, "pages network error")
+            _checkpoint_check(status is None or type(status) is int and 100 <= status <= 599, "pages network status")
+        else:
+            _checkpoint_check(type(status) is int and 100 <= status <= 599 and "error_type" not in page, "pages HTTP status")
+            if outcome in {"parsed", "unsupported_portal_directory"}:
+                _checkpoint_check(status == 200 and isinstance(page.get("sha256"), str) and re.fullmatch(r"[0-9a-f]{64}", page["sha256"]) is not None, "pages parsed hash/status")
+                _checkpoint_check((outcome == "parsed") == (page["portal"] in SUPPORTED_PORTALS), "pages parser outcome")
+            else:
+                valid = ((outcome == "blocked" and status in {401, 403, 429}) or (outcome == "redirect_requires_review" and 300 <= status < 400) or (outcome == "page_too_large" and status == 200) or (outcome == "http_error" and status != 200 and status not in {401, 403, 429} and not 300 <= status < 400))
+                _checkpoint_check(valid and "sha256" not in page, "pages outcome/status")
+        key = (page["portal"], page["url"])
+        _checkpoint_check(key not in pages, "duplicate pages")
+        pages[key] = page
+    seen = set()
+    for entry in state["frontier"]:
+        _validate_frontier_entry(entry, pages, geography, state["seed_urls"])
+        key = (entry["portal"], entry["url"])
+        _checkpoint_check(key not in seen and key not in pages, "duplicate/already visited frontier")
+        seen.add(key)
+    seen = set()
+    for target in state["targets"]:
+        _checkpoint_check(isinstance(target, dict), "targets record")
+        _checkpoint_url(target.get("portal"), target.get("url"), "targets URL")
+        for result in _record_evidence(target, pages, geography, "targets"):
+            expected = [row for row in result["targets"] if row["url"] == target["url"]]
+            omitted = {"discovered_from", "provenance"}
+            _checkpoint_check(len(expected) == 1 and {k: v for k, v in target.items() if k not in omitted} == {k: v for k, v in expected[0].items() if k not in omitted}, "targets URL/operation/INE/priority")
+        key = (target["portal"], target["operation"], target["municipality"], target["url"])
+        _checkpoint_check(key not in seen, "duplicate targets")
+        seen.add(key)
+    seen = set()
+    for excluded in state["excluded"]:
+        _checkpoint_check(isinstance(excluded, dict), "excluded record")
+        portal, source = excluded.get("portal"), excluded.get("discovered_from")
+        _checkpoint_url(portal, source, "excluded source")
+        if excluded.get("reason") == "unsupported_portal_directory":
+            page = pages.get((portal, source))
+            _checkpoint_check(page is not None and page["outcome"] == "unsupported_portal_directory" and excluded == {"portal": portal, "url": source, "reason": "unsupported_portal_directory", "discovered_from": source}, "excluded unsupported parser")
+        else:
+            evidence = {key: excluded[key] for key in ("discovered_from", "source_sha256", "href", "label", "directory_group") if key in excluded}
+            _checkpoint_check(excluded in _evidence_result(evidence, portal, pages, geography)["excluded"], "excluded reason/route/provenance")
+        key = json.dumps(excluded, sort_keys=True, ensure_ascii=False)
+        _checkpoint_check(key not in seen, "duplicate excluded records")
+        seen.add(key)
+
+
 def _observed(state, geography):
     expected = len(geography.municipalities) * 2
     portals = {}
@@ -300,50 +460,64 @@ def _observed(state, geography):
     coverage = {"municipalities_expected": len(geography.municipalities), "operations": ["rent", "sale"],
                 "expected_pairs_per_portal": expected, "portals": portals,
                 "national_complete": all(p["missing_pairs"] == 0 for p in portals.values())}
-    return {"schema_version": 1, "validation": "observed_links_require_search_geography_validation_before_promotion",
+    return {"schema_version": CHECKPOINT_VERSION, "execution_mode": state["execution_mode"], "parser_sha256": state["parser_sha256"],
+            "validation": "observed_links_require_search_geography_validation_before_promotion",
             "geography": state["geography"], "targets": state["targets"], "excluded": state["excluded"],
             "pages": state["pages"], "coverage": coverage}
 
 
-def run_discovery(client, geography, checkpoint_path, output_path, *, seeds=DEFAULT_SEEDS, max_pages=5, max_depth=2, max_page_bytes=4 * 1024 * 1024):
+def run_discovery(client, geography, checkpoint_path, output_path, *, seeds=DEFAULT_SEEDS, max_pages=5, max_depth=2, max_page_bytes=4 * 1024 * 1024, execution_mode="http"):
     """Use one writer per checkpoint. Save each completed page before the next request.
 
     Failed/blocked URLs are recorded once and are not automatically retried. Deeper
     frontier entries remain durable for a later invocation with a larger max_depth.
     """
+    if not isinstance(execution_mode, str) or execution_mode not in EXECUTION_MODES:
+        raise ValueError("Execution mode must be http or fixture_replay")
     checkpoint_path, output_path = Path(checkpoint_path), Path(output_path)
     lock = checkpoint_path.with_name(checkpoint_path.name + ".lock")
     if output_path.resolve() == lock.resolve():
         raise ValueError("Output cannot replace the checkpoint lock")
     if max_pages < 1 or max_depth < 0 or max_page_bytes < 1 or checkpoint_path.resolve() == output_path.resolve():
         raise ValueError("Invalid work bounds or identical checkpoint/output paths")
+    seed_urls = _normalized_seed_urls(seeds)
+    original_bytes = None
+    if checkpoint_path.exists():
+        original_bytes = checkpoint_path.read_bytes()
+        try:
+            state = json.loads(original_bytes)
+        except (ValueError, UnicodeError) as error:
+            raise ValueError("Invalid checkpoint JSON; preserve it and use a separate checkpoint") from error
+        _validate_checkpoint(state, geography, execution_mode)
+        _checkpoint_check(state["seed_urls"] == seed_urls, "seed inputs changed; use a separate checkpoint")
+    else:
+        frontier = []
+        for position, url in enumerate(seed_urls):
+            portal = _portal(url)
+            frontier.append({"portal": portal, "url": url, "scope": "seed", "depth": 0, "seed_order": position, "discovered_from": [], "provenance": []})
+        state = {"schema_version": CHECKPOINT_VERSION, "execution_mode": execution_mode,
+                 "parser_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), "geography": geography.identity(), "seed_urls": seed_urls,
+                 "frontier": _merge_frontier(frontier), "pages": [], "targets": [], "excluded": []}
+        _validate_checkpoint(state, geography, execution_mode)
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     with lock.open("x", encoding="utf-8") as handle:
         handle.write(str(os.getpid()))
     try:
-        if checkpoint_path.exists():
-            state = json.loads(checkpoint_path.read_text(encoding="utf-8"))
-            if state.get("schema_version") != 1 or state.get("geography") != geography.identity():
-                raise ValueError("Checkpoint schema or geography inputs changed; use a separate checkpoint")
+        if original_bytes is not None:
+            if not checkpoint_path.exists() or checkpoint_path.read_bytes() != original_bytes:
+                raise ValueError("Checkpoint changed before lock acquisition; retry the same checkpoint")
+        elif checkpoint_path.exists():
+            raise ValueError("Checkpoint appeared before lock acquisition; retry the same checkpoint")
         else:
-            frontier = []
-            for position, url in enumerate(seeds):
-                portal = _portal(url)
-                if portal is None:
-                    raise ValueError("Seed outside portal allowlist")
-                url = _safe_url(url, url, portal)
-                frontier.append({"portal": portal, "url": url, "scope": "seed", "depth": 0, "seed_order": position, "discovered_from": [], "provenance": []})
-            state = {"schema_version": 1, "geography": geography.identity(), "frontier": _merge_frontier(frontier), "pages": [], "targets": [], "excluded": []}
             _atomic_json(checkpoint_path, state)
-        for entry in state["frontier"]:
-            _safe_url(entry["url"], entry["url"], entry["portal"])
         pages_this_run = 0
         while pages_this_run < max_pages:
             position = next((i for i, e in enumerate(state["frontier"]) if e["depth"] <= max_depth), None)
             if position is None:
                 break
             entry = state["frontier"][position]
-            page = {"portal": entry["portal"], "url": entry["url"], "depth": entry["depth"], "retrieved_at": datetime.now(timezone.utc).isoformat()}
+            page = {"portal": entry["portal"], "url": entry["url"], "depth": entry["depth"], "request": entry,
+                    "retrieved_at": datetime.now(timezone.utc).isoformat()}
             parsed = None
             try:
                 client.cookies.clear()

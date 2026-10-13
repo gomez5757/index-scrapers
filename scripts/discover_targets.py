@@ -1,6 +1,7 @@
 """Run bounded directory discovery in Actions; output never promotes production targets."""
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -44,10 +45,15 @@ def main(argv=None):
         city_slugs[code] = slug
     geography = MunicipalityIndex.from_csv(args.municipalities, provinces_html=args.provinces_html, capitals_html=args.capitals_html,
                                          major_codes={t["municipality"] for t in existing if t.get("priority") == "major"}, city_slugs=city_slugs)
+    geography.fingerprints.update({"existing_targets": hashlib.sha256(args.existing_targets.read_bytes()).hexdigest(),
+                                  "discovery_script": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()})
     seeds = [url for url in DEFAULT_SEEDS if not args.portal or any(urlsplit_host(url) in HOSTS[p] for p in args.portal)]
-    with httpx.Client(timeout=args.timeout, follow_redirects=False, trust_env=False) as client:
-        summary = run_discovery(client, geography, args.checkpoint, args.output, seeds=seeds, max_pages=args.max_pages,
-                                max_depth=args.max_depth, max_page_bytes=args.max_page_bytes)
+    try:
+        with httpx.Client(timeout=args.timeout, follow_redirects=False, trust_env=False) as client:
+            summary = run_discovery(client, geography, args.checkpoint, args.output, seeds=seeds, max_pages=args.max_pages,
+                                    max_depth=args.max_depth, max_page_bytes=args.max_page_bytes, execution_mode="http")
+    except ValueError as error:
+        parser.error(str(error))
     print(json.dumps(summary, ensure_ascii=True, sort_keys=True))
     return 0
 
