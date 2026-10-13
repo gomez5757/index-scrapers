@@ -1,0 +1,36 @@
+name: Probe Idealista public browser access on Windows
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated probe dependencies
+        run: python -m pip install . 'playwright==1.63.0'
+      - name: Install Chromium on this runner
+        run: python -m playwright install chromium
+      - name: Observe one public page with a clean headless browser context
+        shell: pwsh
+        run: |
+          python scripts/probe_idealista.py --browser chromium --output probe-artifacts/report.json
+          exit $LASTEXITCODE
+      - name: Publish observation report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: idealista-windows-browser-probe-${{ github.run_id }}-${{ github.run_attempt }}
+          path: probe-artifacts/report.json
+          if-no-files-found: warn
+          retention-days: 1
