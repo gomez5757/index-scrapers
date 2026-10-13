@@ -79,8 +79,9 @@ def test_report_url_drops_credentials_and_query_tokens():
     assert probe.public_url("https://user:secret@www.idealista.com/login?token=secret#fragment") == "https://www.idealista.com/login"
 
 
-def test_driver_failure_still_produces_a_report_without_raw_error(monkeypatch):
-    async def fail(playwright, report):
+@pytest.mark.parametrize("headless", [True, False])
+def test_driver_failure_still_produces_a_report_without_raw_error(monkeypatch, headless):
+    async def fail(playwright, report, *, headless):
         raise RuntimeError("secret?token=do-not-log")
 
     class FakeManager:
@@ -95,14 +96,16 @@ def test_driver_failure_still_produces_a_report_without_raw_error(monkeypatch):
     monkeypatch.setitem(sys.modules, "playwright", ModuleType("playwright"))
     monkeypatch.setitem(sys.modules, "playwright.async_api", fake_api)
     monkeypatch.setattr(probe, "observe", fail)
-    result = asyncio.run(probe.run_probe())
+    result = asyncio.run(probe.run_probe(headless=headless))
     assert result["status"] == "error"
     assert result["reason"] == "runtime_error"
     assert result["error_type"] == "RuntimeError"
+    assert result["headless"] is headless
     assert "do-not-log" not in str(result)
 
 
-def test_browser_uses_a_clean_context_one_navigation_and_stops_on_block(monkeypatch):
+@pytest.mark.parametrize("headless", [True, False])
+def test_browser_uses_a_clean_context_one_navigation_and_stops_on_block(monkeypatch, headless):
     fake_api = ModuleType("playwright.async_api")
     fake_api.TimeoutError = type("FakeTimeoutError", (Exception,), {})
     monkeypatch.setitem(sys.modules, "playwright", ModuleType("playwright"))
@@ -147,12 +150,12 @@ def test_browser_uses_a_clean_context_one_navigation_and_stops_on_block(monkeypa
 
     class Chromium:
         async def launch(self, **kwargs):
-            assert kwargs == {"headless": True, "timeout": 10000}
+            assert kwargs == {"headless": headless, "timeout": 10000}
             return Browser()
 
     playwright = type("Playwright", (), {"chromium": Chromium()})()
     report = {"http_status": None}
-    asyncio.run(probe.observe(playwright, report))
+    asyncio.run(probe.observe(playwright, report, headless=headless))
     assert report["status"] == "blocked"
     assert [call[0] for call in calls] == ["new_context", "goto", "close"]
     assert calls[1][1] == probe.TARGET_URL

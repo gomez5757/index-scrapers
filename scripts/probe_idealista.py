@@ -117,10 +117,10 @@ async def snapshot(page, http_status):
     )
 
 
-async def observe(playwright, report):
+async def observe(playwright, report, *, headless=True):
     from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
-    browser = await playwright.chromium.launch(headless=True, timeout=10000)
+    browser = await playwright.chromium.launch(headless=headless, timeout=10000)
     try:
         context = await browser.new_context()
         page = await context.new_page()
@@ -146,7 +146,7 @@ async def observe(playwright, report):
         await asyncio.wait_for(browser.close(), timeout=3)
 
 
-async def run_probe():
+async def run_probe(*, headless=True):
     started = time.monotonic()
     try:
         playwright_version = version("playwright")
@@ -163,7 +163,7 @@ async def run_probe():
         "listing_count": None,
         "playwright_version": playwright_version,
         "browser": "chromium",
-        "headless": True,
+        "headless": headless,
         "timeout_seconds": TOTAL_TIMEOUT_SECONDS,
     }
     try:
@@ -171,7 +171,7 @@ async def run_probe():
 
         async with asyncio.timeout(TOTAL_TIMEOUT_SECONDS):
             async with async_playwright() as playwright:
-                await observe(playwright, report)
+                await observe(playwright, report, headless=headless)
     except TimeoutError:
         report.update(status="error", reason="total_timeout")
     except Exception as error:
@@ -184,8 +184,9 @@ async def run_probe():
 def main():
     arguments = argparse.ArgumentParser(description=__doc__)
     arguments.add_argument("--output", type=Path, default=Path("probe-artifacts/report.json"))
+    arguments.add_argument("--headed", action="store_true", help="Use a headed Chromium browser; Linux runners require a display such as Xvfb")
     args = arguments.parse_args()
-    report = asyncio.run(run_probe())
+    report = asyncio.run(run_probe(headless=not args.headed))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     content = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
     args.output.write_text(content, encoding="utf-8")
