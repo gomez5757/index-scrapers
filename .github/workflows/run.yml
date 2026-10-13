@@ -52,6 +52,11 @@ jobs:
         run: |
           args=("$TASK_MODE")
           if [[ "$OPERATION" != 'all' ]]; then args+=(--operation "$OPERATION"); fi
+          if [[ "$TASK_MODE" == 'discover' ]]; then
+            args+=(--continue-initial --initial-max-pages 36)
+          elif [[ "$TASK_MODE" == 'initial' ]]; then
+            args+=(--max-pages 36)
+          fi
           python -m index_scrapers.cli "${args[@]}" --no-delivery
       - id: snapshot_prepare
         if: ${{ always() && steps.restore.outcome == 'success' }}

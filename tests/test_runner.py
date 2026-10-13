@@ -171,3 +171,11 @@ def test_initial_load_resumes_next_page_from_persistent_cursor(tmp_path):
         discover(state, client, [CONTEXT], "2026-10-12T14:00:00Z", max_pages=1, hash_images=False, resume=True)
         assert visited == ["/alquiler-viviendas/madrid-madrid/", "/alquiler-viviendas/madrid-madrid/pagina-2.htm"]
         assert {row["id"] for row in state.catalog()} == {"idealista:10001", "idealista:10003"}
+
+
+@pytest.mark.parametrize("portal,total,pages,size", [("fotocasa", 8522, 285, 30), ("habitaclia", 7654, 264, 29)])
+def test_initial_pagination_metadata_matches_saved_portal_capture(portal, total, pages, size):
+    from index_scrapers.runner import _pagination
+    from selectolax.parser import HTMLParser
+    html = (Path(__file__).parent / f"fixtures/captures/{portal}.http-200.html").read_text(encoding="utf-8")
+    assert _pagination(HTMLParser(html), portal) == {"page": 1, "page_size": size, "total_results": total, "total_pages": pages, "has_more": True}
