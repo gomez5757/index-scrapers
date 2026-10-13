@@ -18,6 +18,10 @@ on:
         type: choice
         options: [chromium, firefox]
         default: chromium
+      wait_for_render:
+        description: 'Solo acceso directo: esperar hasta 15 s a tarjetas públicas sin interacción'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -29,6 +33,7 @@ jobs:
     env:
       NAVIGATION_MODE: ${{ inputs.navigation_mode }}
       BROWSER_ENGINE: ${{ inputs.browser_engine }}
+      WAIT_FOR_RENDER: ${{ inputs.wait_for_render }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -47,12 +52,14 @@ jobs:
         run: |
           args=(--browser "$BROWSER_ENGINE" --output probe-artifacts/report.json)
           if [[ "$NAVIGATION_MODE" == 'via_home' ]]; then args+=(--via-home); fi
+          if [[ "$NAVIGATION_MODE" == 'direct' && "$WAIT_FOR_RENDER" == 'true' ]]; then args+=(--wait-for-render); fi
           timeout --signal=TERM --kill-after=5s 75s python scripts/probe_idealista.py "${args[@]}"
       - name: Observe one public page with a clean headed browser context
         if: ${{ inputs.browser_mode == 'headed' }}
         run: |
           args=(--browser "$BROWSER_ENGINE" --headed --output probe-artifacts/report.json)
           if [[ "$NAVIGATION_MODE" == 'via_home' ]]; then args+=(--via-home); fi
+          if [[ "$NAVIGATION_MODE" == 'direct' && "$WAIT_FOR_RENDER" == 'true' ]]; then args+=(--wait-for-render); fi
           timeout --signal=TERM --kill-after=5s 75s xvfb-run --auto-servernum python scripts/probe_idealista.py "${args[@]}"
       - name: Publish observation report
         if: ${{ always() }}

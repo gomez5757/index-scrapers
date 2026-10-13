@@ -2,7 +2,7 @@ import asyncio
 import importlib.util
 from pathlib import Path
 import sys
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -83,7 +83,7 @@ def test_report_url_drops_credentials_and_query_tokens():
 @pytest.mark.parametrize("via_home", [True, False])
 @pytest.mark.parametrize("browser", ["chromium", "firefox"])
 def test_driver_failure_still_produces_a_report_without_raw_error(monkeypatch, headless, via_home, browser):
-    async def fail(playwright, report, *, headless, via_home, browser):
+    async def fail(playwright, report, *, headless, via_home, browser, wait_for_render=False):
         assert browser == report["browser"]
         raise RuntimeError("secret?token=do-not-log")
 
@@ -188,11 +188,192 @@ def test_cli_propagates_browser_engine_headed_and_navigation_mode(monkeypatch, t
     monkeypatch.setattr(sys, "argv", argv)
     monkeypatch.setattr(probe, "run_probe", fake_probe)
     assert probe.main() == 0
-    assert observed == [{"headless": False, "via_home": True, "browser": browser or "chromium"}]
+    assert observed == [{"headless": False, "via_home": True, "browser": browser or "chromium", "wait_for_render": False}]
 
 
 def test_cli_rejects_an_unavailable_browser_engine_before_starting_runtime(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["probe", "--browser", "webkit"])
+    with pytest.raises(SystemExit) as error:
+        probe.main()
+    assert error.value.code == 2
+
+
+def fake_direct_render(monkeypatch, *, initial_status=403, final_status=None, articles=False, manual_auth=False, captcha=False, subframe=False, hang=False):
+    fake_api = ModuleType("playwright.async_api")
+    fake_api.TimeoutError = type("FakeTimeoutError", (Exception,), {})
+    monkeypatch.setitem(sys.modules, "playwright", ModuleType("playwright"))
+    monkeypatch.setitem(sys.modules, "playwright.async_api", fake_api)
+    calls = []
+    target_html = (ROOT / "tests/fixtures/idealista.synthetic.html").read_text(encoding="utf-8")
+
+    class VisibleLocator:
+        async def count(self):
+            return 1
+
+        def nth(self, index):
+            return self
+
+        async def is_visible(self):
+            return True
+
+        async def click(self, **kwargs):
+            pytest.fail("Render diagnostics must never interact with authentication or CAPTCHA")
+
+    class EmptyLocator(VisibleLocator):
+        async def count(self):
+            return 0
+
+    class Page:
+        url = probe.TARGET_URL
+        main_frame = object()
+        response_callback = None
+        rendered = False
+
+        def on(self, event, callback):
+            assert event == "response"
+            self.response_callback = callback
+
+        def response(self, status, frame=None):
+            request = SimpleNamespace(is_navigation_request=lambda: True)
+            response = SimpleNamespace(status=status, request=request, frame=self.main_frame if frame is None else frame)
+            if self.response_callback:
+                self.response_callback(response)
+            return response
+
+        async def goto(self, url, **kwargs):
+            assert url == probe.TARGET_URL
+            calls.append(("goto", url))
+            return self.response(initial_status)
+
+        async def content(self):
+            return target_html if self.rendered else "<body>Automatic browser check</body>"
+
+        async def title(self):
+            return "idealista"
+
+        def locator(self, selector):
+            if selector == probe.LOGIN_SELECTOR and manual_auth or selector == probe.CHALLENGE_SELECTOR and captcha:
+                return VisibleLocator()
+            return EmptyLocator()
+
+        async def wait_for_selector(self, selector, **kwargs):
+            assert selector == "article.item"
+            assert kwargs == {"state": "visible", "timeout": 15000}
+            calls.append(("wait_for_render",))
+            if hang:
+                await asyncio.sleep(1)
+            if final_status is not None:
+                self.response(final_status, object() if subframe else None)
+            self.rendered = articles
+            if not articles:
+                raise fake_api.TimeoutError("render deadline")
+
+    page = Page()
+
+    class Context:
+        async def new_page(self):
+            return page
+
+    class Browser:
+        async def new_context(self, *args, **kwargs):
+            assert args == () and kwargs == {}
+            return Context()
+
+        async def close(self):
+            calls.append(("close",))
+
+    class Engine:
+        async def launch(self, **kwargs):
+            assert kwargs == {"headless": False, "timeout": 10000}
+            return Browser()
+
+    playwright = SimpleNamespace(chromium=Engine())
+
+    class Manager:
+        async def __aenter__(self):
+            return playwright
+
+        async def __aexit__(self, *args):
+            return False
+
+    fake_api.async_playwright = Manager
+    return playwright, {"http_status": None}, calls
+
+
+def test_wait_for_render_retains_initial_403_and_observes_real_main_frame_200(monkeypatch):
+    playwright, report, calls = fake_direct_render(monkeypatch, final_status=200, articles=True)
+    asyncio.run(probe.observe(playwright, report, headless=False, wait_for_render=True))
+    assert report["initial_http_status"] == 403
+    assert report["http_status"] == 200 and report["status"] == "accessible"
+    assert report["listing_count"] == 1 and report["public_render_observed"] is True
+    assert report["trace"][-1]["http_status"] == 200
+    assert [call[0] for call in calls] == ["goto", "wait_for_render", "close"]
+
+
+def test_wait_for_render_preserves_permanent_403_at_the_render_deadline(monkeypatch):
+    playwright, report, calls = fake_direct_render(monkeypatch)
+    asyncio.run(probe.observe(playwright, report, headless=False, wait_for_render=True))
+    assert report["initial_http_status"] == report["http_status"] == 403
+    assert report["status"] == "blocked" and report["reason"] == "http_403"
+    assert report["public_render_observed"] is False
+    assert [call[0] for call in calls] == ["goto", "wait_for_render", "close"]
+
+
+@pytest.mark.parametrize("subframe", [False, True])
+def test_wait_for_render_never_infers_http_200_from_dom_or_subframe(monkeypatch, subframe):
+    playwright, report, calls = fake_direct_render(monkeypatch, final_status=200 if subframe else None, articles=True, subframe=subframe)
+    asyncio.run(probe.observe(playwright, report, headless=False, wait_for_render=True))
+    assert report["public_render_observed"] is True
+    assert report["initial_http_status"] == report["http_status"] == 403
+    assert report["status"] == "blocked"
+
+
+@pytest.mark.parametrize("initial_status", [401, 429])
+def test_wait_for_render_does_not_wait_for_authentication_or_rate_limit(monkeypatch, initial_status):
+    playwright, report, calls = fake_direct_render(monkeypatch, initial_status=initial_status)
+    asyncio.run(probe.observe(playwright, report, headless=False, wait_for_render=True))
+    assert report["status"] == "blocked" and report["http_status"] == initial_status
+    assert [call[0] for call in calls] == ["goto", "close"]
+
+
+def test_wait_for_render_does_not_interact_with_manual_authentication(monkeypatch):
+    playwright, report, calls = fake_direct_render(monkeypatch, manual_auth=True)
+    asyncio.run(probe.observe(playwright, report, headless=False, wait_for_render=True))
+    assert report["status"] == "blocked" and report["reason"] == "authentication_required"
+    assert [call[0] for call in calls] == ["goto", "close"]
+
+
+def test_wait_for_render_only_waits_for_articles_without_interacting_with_captcha(monkeypatch):
+    playwright, report, calls = fake_direct_render(monkeypatch, captcha=True)
+    asyncio.run(probe.observe(playwright, report, headless=False, wait_for_render=True))
+    assert report["status"] == "blocked"
+    assert [call[0] for call in calls] == ["goto", "wait_for_render", "close"]
+
+
+def test_wait_for_render_respects_the_total_deadline_and_closes_browser(monkeypatch):
+    playwright, report, calls = fake_direct_render(monkeypatch, hang=True)
+    monkeypatch.setattr(probe, "TOTAL_TIMEOUT_SECONDS", 0.001)
+    result = asyncio.run(probe.run_probe(headless=False, wait_for_render=True))
+    assert result["status"] == "error" and result["reason"] == "total_timeout"
+    assert result["initial_http_status"] == 403
+    assert calls[-1] == ("close",)
+
+
+def test_cli_propagates_wait_for_render_only_for_direct_navigation(monkeypatch, tmp_path):
+    observed = []
+
+    async def fake_probe(**kwargs):
+        observed.append(kwargs)
+        return {"status": "blocked"}
+
+    monkeypatch.setattr(sys, "argv", ["probe", "--headed", "--wait-for-render", "--output", str(tmp_path / "report.json")])
+    monkeypatch.setattr(probe, "run_probe", fake_probe)
+    assert probe.main() == 0
+    assert observed == [{"headless": False, "via_home": False, "browser": "chromium", "wait_for_render": True}]
+
+
+def test_cli_rejects_wait_for_render_with_via_home_before_starting_runtime(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["probe", "--via-home", "--wait-for-render"])
     with pytest.raises(SystemExit) as error:
         probe.main()
     assert error.value.code == 2

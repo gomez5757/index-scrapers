@@ -262,7 +262,7 @@ async def observe_via_home(page, report, timeout_error):
             return
 
 
-async def observe(playwright, report, *, headless=True, via_home=False, browser="chromium"):
+async def observe(playwright, report, *, headless=True, via_home=False, browser="chromium", wait_for_render=False):
     from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
     engine = getattr(playwright, browser)
@@ -273,14 +273,47 @@ async def observe(playwright, report, *, headless=True, via_home=False, browser=
         if via_home:
             await observe_via_home(page, report, PlaywrightTimeoutError)
             return
+        navigation_status = {"latest": None}
+        if wait_for_render:
+            report["public_render_observed"] = False
+
+            def record_response(response):
+                if response.request.is_navigation_request() and response.frame == page.main_frame:
+                    navigation_status["latest"] = response.status
+                    report["last_navigation_http_status"] = response.status
+
+            page.on("response", record_response)
         navigation_timed_out = False
         try:
             response = await page.goto(TARGET_URL, wait_until="domcontentloaded", timeout=30000)
             report["http_status"] = response.status if response else None
         except PlaywrightTimeoutError:
             navigation_timed_out = True
+        if wait_for_render:
+            if report["http_status"] is None:
+                report["http_status"] = navigation_status["latest"]
+            report["initial_http_status"] = report["http_status"]
         report.update(await snapshot(page, report["http_status"]))
         trace_document(report, "target", report)
+        if wait_for_render and not navigation_timed_out:
+            if report["http_status"] in {401, 429}:
+                return
+            path = urlsplit(report["final_url"] or "").path.lower().split("/")
+            manual_auth = any(segment in {"login", "signin", "identificacion", "access"} for segment in path) or await any_visible(page, LOGIN_SELECTOR)
+            if manual_auth:
+                report.update(status="blocked", reason="authentication_required")
+                report["trace"][-1].update(status="blocked", reason="authentication_required")
+                return
+            try:
+                await page.wait_for_selector("article.item", state="visible", timeout=15000)
+            except PlaywrightTimeoutError:
+                report.update(await snapshot(page, report["initial_http_status"]))
+            else:
+                report["public_render_observed"] = True
+                latest_status = navigation_status["latest"]
+                report.update(await snapshot(page, latest_status if latest_status is not None else report["initial_http_status"]))
+            report["trace"][-1].update(url=report["final_url"], http_status=report["http_status"], status=report["status"], reason=report["reason"])
+            return
         if report["status"] in {"blocked", "accessible"}:
             return
         if navigation_timed_out:
@@ -298,7 +331,7 @@ async def observe(playwright, report, *, headless=True, via_home=False, browser=
         await asyncio.wait_for(browser.close(), timeout=3)
 
 
-async def run_probe(*, headless=True, via_home=False, browser="chromium"):
+async def run_probe(*, headless=True, via_home=False, browser="chromium", wait_for_render=False):
     started = time.monotonic()
     try:
         playwright_version = version("playwright")
@@ -317,6 +350,7 @@ async def run_probe(*, headless=True, via_home=False, browser="chromium"):
         "browser": browser,
         "headless": headless,
         "navigation_mode": "via_home" if via_home else "direct",
+        "wait_for_render": wait_for_render,
         "trace": [],
         "timeout_seconds": TOTAL_TIMEOUT_SECONDS,
     }
@@ -325,7 +359,7 @@ async def run_probe(*, headless=True, via_home=False, browser="chromium"):
 
         async with asyncio.timeout(TOTAL_TIMEOUT_SECONDS):
             async with async_playwright() as playwright:
-                await observe(playwright, report, headless=headless, via_home=via_home, browser=browser)
+                await observe(playwright, report, headless=headless, via_home=via_home, browser=browser, wait_for_render=wait_for_render)
     except TimeoutError:
         report.update(status="error", reason="total_timeout")
     except Exception as error:
@@ -341,8 +375,11 @@ def main():
     arguments.add_argument("--headed", action="store_true", help="Use a headed browser; Linux runners require a display such as Xvfb")
     arguments.add_argument("--via-home", action="store_true", help="Start at the public home page and follow published rental links, at most three documents")
     arguments.add_argument("--browser", choices=["chromium", "firefox"], default="chromium", help="Standard Playwright browser engine")
+    arguments.add_argument("--wait-for-render", action="store_true", help="Direct navigation only: passively wait up to 15 seconds for public listing cards")
     args = arguments.parse_args()
-    report = asyncio.run(run_probe(headless=not args.headed, via_home=args.via_home, browser=args.browser))
+    if args.wait_for_render and args.via_home:
+        arguments.error("--wait-for-render is supported only with direct navigation")
+    report = asyncio.run(run_probe(headless=not args.headed, via_home=args.via_home, browser=args.browser, wait_for_render=args.wait_for_render))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     content = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
     args.output.write_text(content, encoding="utf-8")
