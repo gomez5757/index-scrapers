@@ -1,0 +1,5 @@
+# Preserve the original bytes referenced by SHA-256 provenance.
+config/** -text whitespace=cr-at-eol
+data/** -text whitespace=cr-at-eol
+# Captured source whitespace belongs to the original, whose hash is checked.
+tests/fixtures/** -text -whitespace
