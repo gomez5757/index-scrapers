@@ -2,6 +2,15 @@ name: Probe published public sources
 
 on:
   workflow_dispatch:
+    inputs:
+      source_set:
+        description: Fixed published resources to observe once
+        type: choice
+        required: true
+        default: default
+        options:
+          - default
+          - idealista_directories
 
 permissions:
   contents: read
@@ -19,8 +28,10 @@ jobs:
           python-version: '3.12'
       - name: Install project dependencies
         run: python -m pip install .
-      - name: Diagnose the five published resources once
-        run: python scripts/probe_published_sources.py --output probe-artifacts/report.json
+      - name: Diagnose the selected published resources once
+        env:
+          PROBE_SOURCE_SET: ${{ inputs.source_set }}
+        run: python scripts/probe_published_sources.py --source-set "$PROBE_SOURCE_SET" --output probe-artifacts/report.json
       - name: Publish the observation report only
         if: ${{ always() }}
         uses: actions/upload-artifact@v4

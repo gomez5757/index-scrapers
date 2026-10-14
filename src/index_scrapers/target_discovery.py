@@ -22,10 +22,11 @@ HOSTS = {
     "fotocasa": {"fotocasa.es", "www.fotocasa.es"},
     "habitaclia": {"habitaclia.com", "www.habitaclia.com"},
 }
-SUPPORTED_PORTALS = ("fotocasa", "habitaclia")
-# These four public directory URLs were observed on the primary sites, not expanded from a slug matrix.
+SUPPORTED_PORTALS = ("idealista", "fotocasa", "habitaclia")
+# These five public directory URLs were observed on the primary sites, not expanded from a slug matrix.
 DEFAULT_SEEDS = (
-    "https://www.idealista.com/alquiler-viviendas/",
+    "https://www.idealista.com/long-term-rentals-in-spain",
+    "https://www.idealista.com/properties-for-sale-in-spain",
     "https://www.pisos.com/",
     "https://www.fotocasa.es/es/viviendas-de-alquiler-en-espana",
     "https://www.habitaclia.com/",
@@ -124,6 +125,15 @@ class MunicipalityIndex:
 
 
 def _safe_url(href, source, portal):
+    if portal == "idealista":
+        raw = urlsplit(href)
+        # urljoin removes dot segments; reject them while the published href is intact.
+        if (raw.scheme and raw.scheme != "https" or raw.netloc and raw.hostname not in HOSTS[portal]
+                or raw.username is not None or raw.password is not None or raw.port is not None
+                or raw.query or "\\" in href or re.search(r"[\x00-\x20]", href)
+                or any(part in {".", ".."} for part in raw.path.split("/"))
+                or re.search(r"%(?:2e|2f|5c|25)", raw.path, re.IGNORECASE)):
+            raise ValueError("Unsafe Idealista directory URL")
     parsed = urlsplit(urljoin(source, href))
     if parsed.scheme != "https" or parsed.hostname not in HOSTS[portal] or parsed.username is not None or parsed.password is not None or parsed.port is not None or parsed.query or "\\" in href or re.search(r"[\x00-\x20]", href):
         raise ValueError("URL must use HTTPS and an exact allowlisted portal host without credentials, port, query or whitespace")
@@ -147,8 +157,51 @@ def _normalized_seed_urls(seeds):
     return normalized
 
 
+def _idealista_province_code(name, geography):
+    # These historical province names were observed in Idealista's directory.
+    aliases = {"guipuzcoa": "20", "vizcaya": "48"}
+    province = aliases.get(name) or geography.province_code(name)
+    if province is None or name in aliases:
+        return province
+    # A bilingual combined name can also be a municipality/province pair (Valencia-València).
+    return province if any(_name_key(name) in _aliases(part) for part in geography.provinces[province].split("/")) else None
+
+
+def _idealista_route(path, geography):
+    if path in {"/long-term-rentals-in-spain", "/long-term-rentals-in-spain/"}:
+        return {"scope": "country", "operation": "rent"}
+    if path in {"/properties-for-sale-in-spain", "/properties-for-sale-in-spain/"}:
+        return {"scope": "country", "operation": "sale"}
+    match = re.fullmatch(r"/(alquiler|venta)-viviendas/(?:([a-z0-9]+(?:-[a-z0-9]+)*)(?:/([a-z0-9]+(?:-[a-z0-9]+)*))?/?)?", path)
+    if not match:
+        return None
+    operation, location, area = match.groups()
+    operation = "rent" if operation == "alquiler" else "sale"
+    if location is None:
+        return {"scope": "country", "operation": operation}
+    if area is not None and area.startswith("con-"):
+        return None
+    province = _idealista_province_code(location.removesuffix("-provincia"), geography)
+    if area is not None:
+        # Only a province root can introduce an area; municipal filters are not directories.
+        if province is None and not location.endswith("-provincia"):
+            return None
+        return {"scope": "area", "operation": operation, "province": province}
+    if province is not None or location.endswith("-provincia"):
+        return {"scope": "province", "operation": operation, "province": province}
+    parts = location.split("-")
+    municipal_routes = []
+    for offset in range(1, len(parts)):
+        province = _idealista_province_code("-".join(parts[offset:]), geography)
+        if province is not None:
+            municipal_routes.append(("-".join(parts[:offset]), province))
+    return {"scope": "municipality", "operation": operation, "municipal_routes": municipal_routes}
+
+
 def _route(portal, url, geography):
     path = urlsplit(url).path
+    if portal == "idealista":
+        return _idealista_route(path, geography)
     if portal == "fotocasa":
         match = re.fullmatch(r"/es/(alquiler|comprar)/viviendas/([^/]+)/todas-las-zonas/l/?", path)
         if not match:
@@ -226,15 +279,16 @@ def parse_directory(portal, html, source_url, geography):
         try:
             url = _safe_url(href, source_url, portal)
         except ValueError:
-            if "/viviendas/" in href:
+            if "/viviendas/" in href or portal == "idealista" and ("-viviendas/" in href or "/long-term-rentals-in-spain" in href or "/properties-for-sale-in-spain" in href):
                 excluded.append({"portal": portal, "url": href, "reason": "unsafe_url", **evidence})
             continue
         route = _route(portal, url, geography)
         if route is None:
-            if "/viviendas/" in url:
+            if "/viviendas/" in url or portal == "idealista" and ("-viviendas/" in url or "/long-term-rentals-in-spain" in url or "/properties-for-sale-in-spain" in url):
                 excluded.append({"portal": portal, "url": url, "reason": "unsupported_or_filtered_route", **evidence})
             continue
-        if (route["scope"] == "province" or portal == "habitaclia") and route.get("province") is None:
+        if ((route["scope"] == "province" or portal == "habitaclia") and route.get("province") is None
+                or portal == "idealista" and route["scope"] != "country" and not (route.get("province") or route.get("municipal_routes"))):
             excluded.append({"portal": portal, "url": url, "reason": "unknown_province", **evidence})
             continue
         entry = {"portal": portal, "url": url, "scope": route["scope"], "operation": route["operation"], "discovered_from": [source_url], "provenance": [evidence]}
@@ -251,12 +305,16 @@ def parse_directory(portal, html, source_url, geography):
             frontier.append({**entry, "scope": "area", "province": route["province"], "provenance": [area_evidence]})
             excluded.append({"portal": portal, "url": url, "reason": "non_municipal_area", **area_evidence})
             continue
-        candidates = set(geography.names.get(_name_key(route["name"]), set()))
-        if route.get("province"):
-            candidates = {c for c in candidates if c[:2] == route["province"]}
+        if portal == "idealista":
+            candidates = {code for name, province in route["municipal_routes"]
+                          for code in geography.names.get(_name_key(name), ()) if code[:2] == province}
+        else:
+            candidates = set(geography.names.get(_name_key(route["name"]), set()))
+            if route.get("province"):
+                candidates = {c for c in candidates if c[:2] == route["province"]}
         # A known conflicting anchor label is evidence against an otherwise matching slug.
         label_candidates = geography.names.get(_name_key(label), set())
-        if label_candidates and not candidates.intersection(label_candidates):
+        if label_candidates and (candidates or portal != "idealista") and not candidates.intersection(label_candidates):
             reason = "conflicting_label"
         elif len(candidates) != 1:
             reason = "ambiguous_municipality" if candidates else "unknown_municipality"

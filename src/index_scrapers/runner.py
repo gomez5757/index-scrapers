@@ -91,11 +91,23 @@ def _collect_page(state, client, target, url, now, report, hash_images, read_onl
 
 
 def _next_link(tree):
-    return tree.css_first('a[rel="next"], link[rel="next"], a[aria-label="Siguiente"], a[title="Siguiente"]')
+    return tree.css_first('a[rel="next"], link[rel="next"], a[aria-label="Siguiente"], a[title="Siguiente"]') or tree.css_first(".pagination li.next a")
 
 
 def _pagination(tree, portal):
     metadata = {}
+    if portal == "idealista":
+        heading = tree.css_first("h1")
+        total = re.match(r"^(\d{1,3}(?:[.\s]\d{3})+|\d+)\s+casas y pisos\b", heading.text(separator=" ", strip=True)) if heading else None
+        if total:
+            metadata["total_results"] = int(re.sub(r"[.\s]", "", total.group(1)))
+        selected = tree.css_first(".pagination li.selected > span")
+        if selected and re.fullmatch(r"[1-9][0-9]*", selected.text(strip=True)):
+            metadata["page"] = int(selected.text(strip=True))
+        if metadata.get("total_results", 0) > 0 or _next_link(tree):
+            # The advertised total alone does not establish the last page.
+            metadata["has_more"] = True
+        return metadata
     try:
         if portal == "fotocasa":
             script = tree.css_first("#__initial_props__")

@@ -199,7 +199,7 @@ def test_blocked_responses_and_network_failures_are_durable_gaps(tmp_path, geogr
             return httpx.Response(403, text='<a href="https://www.fotocasa.es/es/alquiler/viviendas/girona-capital/todas-las-zonas/l">Girona</a>')
         raise httpx.ReadError("disconnected", request=request)
     with httpx.Client(transport=httpx.MockTransport(endpoint)) as client:
-        result = run_discovery(client, geography, tmp_path / "checkpoint.json", tmp_path / "observed.json", seeds=DEFAULT_SEEDS[:2], max_pages=2)
+        result = run_discovery(client, geography, tmp_path / "checkpoint.json", tmp_path / "observed.json", seeds=["https://www.idealista.com/long-term-rentals-in-spain", "https://www.pisos.com/"], max_pages=2)
     assert result["targets_observed"] == 0
     state = json.loads((tmp_path / "checkpoint.json").read_text())
     assert {p["outcome"] for p in state["pages"]} == {"blocked", "network_error"}
@@ -224,7 +224,7 @@ def test_redirect_is_not_followed_and_large_pages_are_not_parsed(tmp_path, geogr
             return httpx.Response(302, headers={"Location": "https://evil.test/"})
         return httpx.Response(200, text="x" * 200)
     with httpx.Client(transport=httpx.MockTransport(endpoint), follow_redirects=True) as client:
-        run_discovery(client, geography, tmp_path / "checkpoint.json", tmp_path / "observed.json", seeds=DEFAULT_SEEDS[:2], max_pages=2, max_page_bytes=100)
+        run_discovery(client, geography, tmp_path / "checkpoint.json", tmp_path / "observed.json", seeds=["https://www.idealista.com/long-term-rentals-in-spain", "https://www.pisos.com/"], max_pages=2, max_page_bytes=100)
     assert len(requested) == 2
     assert {p["outcome"] for p in json.loads((tmp_path / "checkpoint.json").read_text())["pages"]} == {"redirect_requires_review", "page_too_large"}
 
@@ -457,9 +457,11 @@ def test_valid_terminal_page_outcomes_resume_without_refetch(tmp_path, geography
             raise httpx.ReadError("offline test", request=request)
         return httpx.Response({"blocked": 403, "redirect": 302, "http_error": 503}.get(case, 200), text="<html></html>" if case != "large" else "x" * 200)
     checkpoint, output = tmp_path / "checkpoint.json", tmp_path / "observed.json"
-    seed = DEFAULT_SEEDS[0] if case == "unsupported" else FC + "/"
+    seed = "https://www.pisos.com/" if case == "unsupported" else FC + "/"
     with httpx.Client(transport=httpx.MockTransport(endpoint)) as client:
         run_discovery(client, geography, checkpoint, output, seeds=[seed], max_pages=1, max_page_bytes=100)
+    if case == "unsupported":
+        assert json.loads(checkpoint.read_text(encoding="utf-8"))["pages"][0]["outcome"] == "unsupported_portal_directory"
     with httpx.Client(transport=httpx.MockTransport(lambda r: pytest.fail("No refetch of validated terminal page"))) as client:
         assert run_discovery(client, geography, checkpoint, output, seeds=[seed], max_pages=1)["pages_this_run"] == 0
 

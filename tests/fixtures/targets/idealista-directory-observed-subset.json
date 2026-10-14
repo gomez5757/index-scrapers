@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "source": "integrated_browser_dom",
+  "source_url": "https://www.idealista.com/long-term-rentals-in-spain",
+  "observed_date": "2026-10-14",
+  "heading": "Viviendas en alquiler en España",
+  "subset": true,
+  "note": "Selección de 14 enlaces leídos del DOM público. No es HTML original ni un directorio completo; no se observó el HTTP del origen.",
+  "observed_source_sha256": "4e61686975b8f109eaa4fa08bed6bb17171bb9886e534f517ac3841ea4bb90e8",
+  "html_reconstruction": "Los tests generan HTML sintético escapando exclusivamente estos href y textos reales; su hash corresponde al HTML reconstruido, no al documento original.",
+  "http_observed": false,
+  "links": [
+    {"text": "Encuentra tu casa en\n\nValencia\n2.239 anuncios", "url": "https://www.idealista.com/alquiler-viviendas/valencia-valencia/"},
+    {"text": "Encuentra tu casa en\n\nMálaga\n1.560 anuncios", "url": "https://www.idealista.com/alquiler-viviendas/malaga-malaga/"},
+    {"text": "Encuentra tu casa en\n\nSevilla\n1.492 anuncios", "url": "https://www.idealista.com/alquiler-viviendas/sevilla-sevilla/"},
+    {"text": "Encuentra tu casa en\n\nGijón\n391 anuncios", "url": "https://www.idealista.com/alquiler-viviendas/gijon-asturias/"},
+    {"text": "Encuentra tu casa en\n\nAlicante\n6.918 anuncios", "url": "https://www.idealista.com/alquiler-viviendas/alicante/"},
+    {"text": "Encuentra tu casa en\n\nMurcia\n842 anuncios", "url": "https://www.idealista.com/alquiler-viviendas/murcia-murcia/"},
+    {"text": "Madrid", "url": "https://www.idealista.com/alquiler-viviendas/madrid-madrid/"},
+    {"text": "Madrid", "url": "https://www.idealista.com/alquiler-viviendas/madrid-provincia/"},
+    {"text": "Murcia", "url": "https://www.idealista.com/alquiler-viviendas/murcia-provincia/"},
+    {"text": "Las Palmas", "url": "https://www.idealista.com/alquiler-viviendas/las-palmas/"},
+    {"text": "Islas Baleares", "url": "https://www.idealista.com/alquiler-viviendas/balears-illes/"},
+    {"text": "El Hierro", "url": "https://www.idealista.com/alquiler-viviendas/santa-cruz-de-tenerife/el-hierro/"},
+    {"text": "Valencia", "url": "https://www.idealista.com/alquiler-viviendas/valencia-provincia/"},
+    {"text": "Vizcaya", "url": "https://www.idealista.com/alquiler-viviendas/vizcaya/"}
+  ]
+}

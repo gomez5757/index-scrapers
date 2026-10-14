@@ -1,4 +1,4 @@
-"""Observe five published resources once; never import listings or solve challenges."""
+"""Observe a fixed set of published resources once; never import listings or solve challenges."""
 
 import argparse
 import asyncio
@@ -35,6 +35,14 @@ RESOURCES = (
     (AGENCY_URL, "agency"),
     (IMAGE_URL, "image"),
 )
+IDEALISTA_DIRECTORY_RESOURCES = (
+    ("https://www.idealista.com/long-term-rentals-in-spain", "directory"),
+    ("https://www.idealista.com/properties-for-sale-in-spain", "directory"),
+)
+RESOURCE_SETS = {
+    "default": RESOURCES,
+    "idealista_directories": IDEALISTA_DIRECTORY_RESOURCES,
+}
 REQUEST_TIMEOUT_SECONDS = 10.0
 GLOBAL_TIMEOUT_SECONDS = 45.0
 TEXT_BODY_LIMIT = 1_048_576
@@ -108,6 +116,8 @@ def _metadata_date(value):
 
 
 def _observations(kind, body, facts):
+    if kind == "directory":
+        return {}
     if kind == "robots":
         directives = [line.split("#", 1)[0].strip().partition(":")
                       for line in body.decode("utf-8", errors="replace").splitlines()]
@@ -213,12 +223,16 @@ async def _observe_one(result, kind, timeout, transport):
         result["sha256"] = hashlib.sha256(body).hexdigest()
 
 
-async def run_probe(*, transport=None):
+async def run_probe(*, transport=None, source_set="default"):
+    try:
+        resources = RESOURCE_SETS[source_set]
+    except KeyError:
+        raise ValueError("Unknown published source set") from None
     deadline = monotonic() + GLOBAL_TIMEOUT_SECONDS
     blocked_origins = set()
     results = []
     diagnostic_complete = True
-    for url, kind in RESOURCES:
+    for url, kind in resources:
         result = _empty_result(url)
         results.append(result)
         remaining = deadline - monotonic()
@@ -269,8 +283,11 @@ def write_report(output, report):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--source-set", choices=tuple(RESOURCE_SETS), default="default",
+                        help="Fixed published resources to observe (default: the existing five).")
     args = parser.parse_args()
-    report = asyncio.run(run_probe())
+    report = asyncio.run(run_probe() if args.source_set == "default"
+                         else run_probe(source_set=args.source_set))
     write_report(args.output, report)
     # A completed diagnosis can contain blocked, invalid JSON or transport error results.
     return 0 if report["diagnostic_complete"] else 1
