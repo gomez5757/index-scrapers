@@ -1,0 +1,171 @@
+name: Import saved observations
+on:
+  workflow_dispatch:
+    inputs:
+      source_artifact_id:
+        description: 'ID del paquete creado por Freeze saved observations'
+        required: true
+        type: number
+      apply:
+        description: 'Incorporar las observaciones elegibles al catálogo existente'
+        type: boolean
+        default: false
+      deliver:
+        description: 'Entregar después de aplicar y conservar el catálogo'
+        type: boolean
+        default: false
+      delivery_limit:
+        description: 'Máximo de anuncios entregados, entre 1 y 100'
+        type: number
+        default: 5
+concurrency:
+  group: index-durable-state
+  cancel-in-progress: false
+  queue: max
+permissions:
+  contents: read
+  actions: read
+jobs:
+  import:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      STATE_PATH: state/catalog.sqlite
+      PACKAGE_PATH: observation-package
+      PREVIEW_REPORT_PATH: observation-preview-report.json
+      APPLY_REPORT_PATH: observation-apply-report.json
+      SOURCE_ARTIFACT_ID: ${{ inputs.source_artifact_id }}
+      APPLY: ${{ inputs.apply }}
+      DELIVER: ${{ inputs.deliver }}
+      DELIVERY_LIMIT: ${{ inputs.delivery_limit }}
+    steps:
+      - id: checkout
+        uses: actions/checkout@v4
+      - id: setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - id: install
+        run: python -m pip install .
+      - id: validate
+        name: Validate explicit options
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import re
+
+          def integer(name, maximum):
+              raw = os.environ[name]
+              if not re.fullmatch(r"[0-9]+", raw) or not 1 <= int(raw) <= maximum:
+                  raise ValueError(f"invalid {name}")
+              return str(int(raw))
+
+          artifact = integer("SOURCE_ARTIFACT_ID", 2**53 - 1)
+          limit = integer("DELIVERY_LIMIT", 100)
+          apply = os.environ["APPLY"]
+          deliver = os.environ["DELIVER"]
+          if apply not in {"true", "false"} or deliver not in {"true", "false"}:
+              raise ValueError("invalid boolean option")
+          if deliver == "true" and apply != "true":
+              raise ValueError("delivery requires apply")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"artifact_id={artifact}\napply={apply}\ndeliver={deliver}\ndelivery_limit={limit}\n")
+          PY
+      - id: restore
+        name: Restore the existing shared catalogue
+        shell: bash
+        run: python -m index_scrapers.cli restore --state "$STATE_PATH"
+      - id: fetch
+        name: Fetch the exact trusted observation package
+        shell: bash
+        run: python -m index_scrapers.observation_packages fetch --repository "$GITHUB_REPOSITORY" --artifact-id "$SOURCE_ARTIFACT_ID" --output-dir "$PACKAGE_PATH"
+      - id: preview
+        name: Preview against the restored catalogue
+        shell: bash
+        run: python -m index_scrapers.cli import-observations --state "$STATE_PATH" --envelopes "$PACKAGE_PATH/observations.jsonl" --report "$PREVIEW_REPORT_PATH"
+      - id: retain_inputs
+        name: Retain originals, manifest and preview before applying
+        uses: actions/upload-artifact@v4
+        with:
+          name: observation-import-inputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            observation-package/
+            observation-preview-report.json
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 6
+      - id: apply
+        name: Apply eligible observations without delivery
+        if: ${{ success() && steps.validate.outputs.apply == 'true' && steps.restore.outcome == 'success' && steps.fetch.outcome == 'success' && steps.preview.outcome == 'success' && steps.retain_inputs.outcome == 'success' }}
+        shell: bash
+        run: |
+          echo 'attempted=true' >> "$GITHUB_OUTPUT"
+          python -m index_scrapers.cli import-observations --state "$STATE_PATH" --envelopes "$PACKAGE_PATH/observations.jsonl" --report "$APPLY_REPORT_PATH" --apply
+      - id: retain_report
+        name: Retain the application report, including partial failures
+        if: ${{ always() && steps.restore.outcome == 'success' && steps.apply.outputs.attempted == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: observation-import-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: observation-apply-report.json
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 6
+      - id: snapshot_prepare
+        name: Save the catalogue before any remote work
+        if: ${{ always() && steps.restore.outcome == 'success' && steps.apply.outputs.attempted == 'true' }}
+        shell: bash
+        run: python -m index_scrapers.cli snapshot --state "$STATE_PATH"
+      - id: upload_prepare
+        if: ${{ always() && steps.snapshot_prepare.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: index-state-${{ github.run_id }}-${{ github.run_attempt }}-pre
+          path: state/artifact/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+      - id: maintenance
+        name: Check the existing bounded FTS maintenance guard
+        if: ${{ always() && steps.validate.outputs.deliver == 'true' && steps.apply.outcome == 'success' && steps.retain_report.outcome == 'success' && steps.upload_prepare.outcome == 'success' }}
+        env:
+          INGEST_URL: ${{ secrets.INGEST_URL }}
+          INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
+        run: python scripts/maintain_fts.py --health fts-maintenance-health.json
+      - id: deliver
+        name: Deliver the explicitly bounded batch
+        if: ${{ always() && steps.validate.outputs.deliver == 'true' && steps.apply.outcome == 'success' && steps.retain_report.outcome == 'success' && steps.upload_prepare.outcome == 'success' && steps.maintenance.outcome == 'success' }}
+        shell: bash
+        env:
+          INGEST_URL: ${{ secrets.INGEST_URL }}
+          INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
+        run: python -m index_scrapers.cli deliver --state "$STATE_PATH" --limit "$DELIVERY_LIMIT" --health delivery-health.json
+      - id: snapshot_final
+        name: Save the final catalogue after every application attempt
+        if: ${{ always() && steps.restore.outcome == 'success' && steps.apply.outputs.attempted == 'true' }}
+        shell: bash
+        run: python -m index_scrapers.cli snapshot --state "$STATE_PATH"
+      - id: upload_final
+        if: ${{ always() && steps.snapshot_final.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: index-state-${{ github.run_id }}-${{ github.run_attempt }}-final
+          path: state/artifact/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+      - id: retain_delivery_report
+        if: ${{ always() && (steps.maintenance.outcome == 'success' || steps.maintenance.outcome == 'failure' || steps.deliver.outcome == 'success' || steps.deliver.outcome == 'failure') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: observation-import-delivery-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            fts-maintenance-health.json
+            delivery-health.json
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 6
