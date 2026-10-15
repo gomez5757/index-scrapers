@@ -313,14 +313,15 @@ class _GitHub:
         self.client, self.token = client, token
         _require(isinstance(token, str) and bool(token) and not re.search(r"[\x00-\x20\x7f]", token), "missing_github_token")
 
-    def get(self, url, *, binary=False, limit=MAX_METADATA_BYTES):
+    def get(self, url, *, binary=False, limit=MAX_METADATA_BYTES, api_accept="application/vnd.github+json"):
         for hop in range(4):
             host = _github_url(url, redirect=binary and hop > 0)
             request = self.client.build_request("GET", url)
             # Explicitly remove client defaults before any cross-origin download.
             for header in ("authorization", "cookie", "proxy-authorization"):
                 request.headers.pop(header, None)
-            request.headers["Accept"] = "application/octet-stream" if binary else "application/vnd.github+json"
+            # Artifact ZIP endpoints negotiate JSON; release assets require octet-stream.
+            request.headers["Accept"] = api_accept if host == "api.github.com" else "application/octet-stream"
             request.headers["X-GitHub-Api-Version"] = "2022-11-28"
             if host == "api.github.com":
                 request.headers["Authorization"] = "Bearer " + self.token
@@ -410,7 +411,8 @@ def _freeze(github, *, repository, release_id, asset_id, sha256, output_dir, env
     _require(size <= MAX_BYTES, "asset_too_large")
     _require(all(entries[0].get(key) == asset.get(key) for key in ("name", "state", "size", "uploader", "url")),
              "asset_metadata_mismatch")
-    package = github.get(f"{_BASE}/releases/assets/{asset_id}", binary=True, limit=MAX_BYTES)
+    package = github.get(f"{_BASE}/releases/assets/{asset_id}", binary=True, limit=MAX_BYTES,
+                         api_accept="application/octet-stream")
     _require(len(package) == size and _sha(package) == sha256, "source_sha256_mismatch")
     manifest, compressed, _, raw_manifest = _unpack(package, attested=False)
     attestation["source"] = {"release_id": release_id, "asset_id": asset_id, "name": ASSET_NAME,
