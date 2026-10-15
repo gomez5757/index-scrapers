@@ -91,8 +91,12 @@ def client_for(routes, downloads, requests):
     def handle(request):
         requests.append(request)
         url = str(request.url)
-        if request.headers.get("accept") == "application/octet-stream" and url in downloads:
+        artifact_download = request.url.host == "api.github.com" and "/actions/artifacts/" in request.url.path
+        download_accept = "application/vnd.github+json" if artifact_download else "application/octet-stream"
+        if request.headers.get("accept") == download_accept and url in downloads:
             value = downloads[url]
+        elif url in downloads and url not in routes:
+            return httpx.Response(415)
         else:
             value = routes.get(url)
         if isinstance(value, httpx.Response):
@@ -265,6 +269,9 @@ def test_freeze_reads_only_exact_asset_and_attests_source(source_package, tmp_pa
     assert all(request.method == "GET" for request in requests)
     assert all(request.headers["authorization"] == "Bearer test-token" for request in requests)
     assert all("cookie" not in request.headers for request in requests)
+    asset_requests = [request for request in requests if request.url.path.endswith(f"/releases/assets/{ASSET}")]
+    assert [request.headers["accept"] for request in asset_requests] == [
+        "application/vnd.github+json", "application/octet-stream"]
 
 
 @pytest.mark.parametrize("mutate,code", [
@@ -330,7 +337,8 @@ def test_client_basic_auth_cannot_override_api_bearer_or_reach_signed_redirect(t
     with httpx.Client(transport=httpx.MockTransport(handle),
                       auth=httpx.BasicAuth("dummy-user", "dummy-password"),
                       headers={"Cookie": "dummy-cookie"}) as client:
-        assert packages._GitHub(client, "test-token").get(source, binary=True) == b"mock-package"
+        assert packages._GitHub(client, "test-token").get(
+            source, binary=True, api_accept="application/octet-stream") == b"mock-package"
     assert len(requests) == 2
     assert "authorization" not in requests[1].headers
     assert "cookie" not in requests[1].headers
@@ -365,6 +373,37 @@ def test_fetch_validates_attempt_and_keeps_pending(source_package, tmp_path, pro
     assert any(str(request.url).endswith(f"/attempts/{ATTEMPT}") for request in requests)
 
 
+@pytest.mark.parametrize("digest_matches", [True, False], ids=["valid-digest", "invalid-digest"])
+def test_fetch_negotiates_json_for_artifacts_and_verifies_digest(source_package, tmp_path, producer_env, digest_matches):
+    freeze_source(source_package, tmp_path, producer_env)
+    data = frozen_zip(tmp_path / "frozen")
+    routes = fetch_routes(data)
+    if not digest_matches:
+        routes[f"{BASE}/actions/artifacts/{ARTIFACT}"]["digest"] = "sha256:" + "c" * 64
+    target = "https://productionresultssa4.blob.core.windows.net/actions-artifacts/test?sig=dummy-signature"
+    downloads = {f"{BASE}/actions/artifacts/{ARTIFACT}/zip": httpx.Response(302, headers={"location": target}),
+                 target: data}
+    requests = []
+    with client_for(routes, downloads, requests) as client:
+        if digest_matches:
+            manifest = packages.fetch(repository=packages.REPOSITORY, artifact_id=ARTIFACT,
+                output_dir=tmp_path / "fetched", client=client, env=producer_env)
+            assert manifest["observations"]["pending"] == 1
+            assert (tmp_path / "fetched/observations.jsonl").read_bytes() == source_package["ready"] + source_package["pending"]
+        else:
+            with pytest.raises(packages.PackageError, match="artifact_sha256_mismatch"):
+                packages.fetch(repository=packages.REPOSITORY, artifact_id=ARTIFACT,
+                    output_dir=tmp_path / "fetched", client=client, env=producer_env)
+            assert not (tmp_path / "fetched").exists()
+    api_requests = [request for request in requests if request.url.host == "api.github.com"]
+    assert all(request.headers["accept"] == "application/vnd.github+json" for request in api_requests)
+    assert all(request.headers["authorization"] == "Bearer test-token" for request in api_requests)
+    assert all("cookie" not in request.headers for request in api_requests)
+    assert requests[-1].url.host == "productionresultssa4.blob.core.windows.net"
+    assert requests[-1].headers["accept"] == "application/octet-stream"
+    assert all(header not in requests[-1].headers for header in ("authorization", "cookie", "proxy-authorization"))
+
+
 def test_consumer_azure_download_has_no_credentials(source_package, tmp_path, producer_env):
     freeze_source(source_package, tmp_path, producer_env)
     data = frozen_zip(tmp_path / "frozen")
@@ -375,6 +414,8 @@ def test_consumer_azure_download_has_no_credentials(source_package, tmp_path, pr
         packages.fetch(repository=packages.REPOSITORY, artifact_id=ARTIFACT, output_dir=tmp_path / "fetched",
                        client=client, env=producer_env)
     assert requests[-1].url.host == "productionresultssa4.blob.core.windows.net"
+    assert requests[-2].headers["accept"] == "application/vnd.github+json"
+    assert requests[-1].headers["accept"] == "application/octet-stream"
     assert "authorization" not in requests[-1].headers and "cookie" not in requests[-1].headers
 
 
