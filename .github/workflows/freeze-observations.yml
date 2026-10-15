@@ -1,0 +1,59 @@
+name: Freeze public Idealista observations
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_id:
+        description: Public release ID in this repository
+        required: true
+        type: string
+      asset_id:
+        description: ID of idealista-observations.zip in that release
+        required: true
+        type: string
+      sha256:
+        description: SHA256 of the uploaded ZIP bytes
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  freeze:
+    if: github.repository == 'trading-optimizer-lab-org/index-scrapers' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install transport dependencies
+        run: python -m pip install .
+      - name: Validate and freeze the exact release asset
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_RELEASE_ID: ${{ inputs.release_id }}
+          SOURCE_ASSET_ID: ${{ inputs.asset_id }}
+          SOURCE_SHA256: ${{ inputs.sha256 }}
+        run: |
+          python -m index_scrapers.observation_packages freeze \
+            --repository "$GITHUB_REPOSITORY" \
+            --release-id "$SOURCE_RELEASE_ID" \
+            --asset-id "$SOURCE_ASSET_ID" \
+            --sha256 "$SOURCE_SHA256" \
+            --output-dir observation-package
+      - name: Publish the validated observations
+        id: observations
+        uses: actions/upload-artifact@v4
+        with:
+          name: idealista-observations-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            observation-package/manifest.json
+            observation-package/observations.jsonl.gz
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
